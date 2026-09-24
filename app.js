@@ -289,7 +289,7 @@ function weatherHtml(w) {
 }
 
 /* ───────── 지도 ───────── */
-const map = L.map('map', { zoomControl: false, attributionControl: true }).setView(CFG.DEFAULT_CENTER, CFG.DEFAULT_ZOOM);
+const map = L.map('map', { zoomControl: false, attributionControl: false }).setView(CFG.DEFAULT_CENTER, CFG.DEFAULT_ZOOM);
 L.control.zoom({ position: 'topleft' }).addTo(map);
 let baseLayers = {}, overlayLayers = {}, layerCtl;
 
@@ -337,9 +337,11 @@ new ResizeObserver(setSheetHeight).observe(sheet);
 // 결과 창 접기/펼치기: 버튼 누르기 또는 위·아래로 밀기
 function setCollapsed(on) {
   sheet.classList.toggle('collapsed', on);
+  LS.set('sheetCollapsed', on);
   $('#sheetHandleText').textContent = on ? '펼치기' : '접기';
   $('#sheetHandle').setAttribute('aria-label', on ? '결과 창 펼치기' : '결과 창 접기');
 }
+setCollapsed(LS.get('sheetCollapsed', false)); // 새로고침해도 접힌 상태 유지
 let handleY = null, handleSwiped = false;
 $('#sheetHandle').addEventListener('touchstart', e => { handleY = e.touches[0].clientY; handleSwiped = false; }, { passive: true });
 $('#sheetHandle').addEventListener('touchmove', e => {
@@ -348,7 +350,7 @@ $('#sheetHandle').addEventListener('touchmove', e => {
   if (Math.abs(dy) > 25) { setCollapsed(dy > 0); handleSwiped = true; handleY = null; }
 }, { passive: true });
 $('#sheetHandle').addEventListener('click', () => { if (handleSwiped) { handleSwiped = false; return; } setCollapsed(!sheet.classList.contains('collapsed')); });
-function sheetHtml(html) { $('#sheetBody').innerHTML = html; setCollapsed(false); $('#sheetBody').scrollTop = 0; }
+function sheetHtml(html) { $('#sheetBody').innerHTML = html; $('#sheetBody').scrollTop = 0; } // 접기/펼치기 상태는 사용자가 정한 대로 유지
 
 /* ───────── 판정 실행 ───────── */
 let checkSeq = 0;
