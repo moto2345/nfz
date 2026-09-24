@@ -286,6 +286,7 @@ let pinMarker = null, meMarker = null, meCircle = null, zoneGeo = L.layerGroup()
 let lastResult = null;
 
 map.on('click', e => checkAt(e.latlng.lat, e.latlng.lng));
+map.on('moveend', () => { const c = map.getCenter(); LS.set('mapView', { lat: c.lat, lng: c.lng, z: map.getZoom() }); });
 
 /* ───────── 하단 시트 ───────── */
 const sheet = $('#sheet');
@@ -309,6 +310,7 @@ async function checkAt(lat, lon, label) {
   const [res, addr] = await Promise.all([analyze(lat, lon), reverseGeocode(lat, lon)]);
   if (seq !== checkSeq) return;
   res.addr = addr; res.label = label || '';
+  LS.set('lastPoint', { lat, lon, label: label || '' });
   lastResult = res;
   renderResult(res);
   drawZones(res);
@@ -387,22 +389,29 @@ function drawZones(r) {
 }
 
 /* ───────── 현재 위치 ───────── */
-$('#btnLocate').addEventListener('click', () => {
-  if (!navigator.geolocation) return toast('이 기기는 위치 기능을 지원하지 않습니다.');
-  toast('현재 위치를 찾는 중…');
+function showMe(lat, lon, accuracy) {
+  if (meMarker) { meMarker.setLatLng([lat, lon]); meCircle.setLatLng([lat, lon]).setRadius(accuracy); }
+  else {
+    meCircle = L.circle([lat, lon], { radius: accuracy, color: '#1e88e5', weight: 1, fillOpacity: 0.1, interactive: false }).addTo(map);
+    meMarker = L.circleMarker([lat, lon], { radius: 8, color: '#fff', weight: 3, fillColor: '#1e88e5', fillOpacity: 1 }).addTo(map);
+  }
+}
+// opt.quiet: 알림 없이 / opt.fallback: 실패하면 이 지점을 판정 / opt.keepView: 지도 위치 유지
+function locateMe(opt = {}) {
+  if (!navigator.geolocation) { if (opt.fallback) checkAt(opt.fallback.lat, opt.fallback.lon, opt.fallback.label); else toast('이 기기는 위치 기능을 지원하지 않습니다.'); return; }
+  if (!opt.quiet) toast('현재 위치를 찾는 중…');
   navigator.geolocation.getCurrentPosition(p => {
     const { latitude: lat, longitude: lon, accuracy } = p.coords;
-    if (meMarker) { meMarker.setLatLng([lat, lon]); meCircle.setLatLng([lat, lon]).setRadius(accuracy); }
-    else {
-      meCircle = L.circle([lat, lon], { radius: accuracy, color: '#1e88e5', weight: 1, fillOpacity: 0.1, interactive: false }).addTo(map);
-      meMarker = L.circleMarker([lat, lon], { radius: 8, color: '#fff', weight: 3, fillColor: '#1e88e5', fillOpacity: 1 }).addTo(map);
-    }
-    map.setView([lat, lon], Math.max(map.getZoom(), 14));
+    showMe(lat, lon, accuracy);
+    if (!opt.keepView) map.setView([lat, lon], Math.max(map.getZoom(), 14));
+    else map.panTo([lat, lon]);
     checkAt(lat, lon, '내 위치');
   }, err => {
+    if (opt.fallback) { checkAt(opt.fallback.lat, opt.fallback.lon, opt.fallback.label); return; }
     toast(err.code === 1 ? '위치 권한이 거부되었습니다. 브라우저 설정에서 허용해 주세요.' : '위치를 가져오지 못했습니다.');
   }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 });
-});
+}
+$('#btnLocate').addEventListener('click', () => locateMe());
 
 /* ───────── 검색 & 즐겨찾기 ───────── */
 const resultsBox = $('#searchResults');
@@ -459,6 +468,7 @@ $$('.tabbar button').forEach(b => b.addEventListener('click', () => {
   $$('.tab').forEach(t => t.classList.toggle('active', t.id === b.dataset.tab));
   if (b.dataset.tab === 'tab-map') setTimeout(() => map.invalidateSize(), 50);
   if (b.dataset.tab === 'tab-log') renderLogs();
+  LS.set('lastTab', b.dataset.tab);
 }));
 function switchTab(id) { $(`.tabbar button[data-tab="${id}"]`).click(); }
 
@@ -659,6 +669,19 @@ $('#btnKeySave').addEventListener('click', () => {
   renderKeyStatus(); buildLayers(); toast('저장했습니다.');
 });
 renderKeyStatus();
+
+/* ───────── 새로고침 시 이전 상태 복원 ───────── */
+(function restore() {
+  const tab = LS.get('lastTab', 'tab-map');
+  if (tab !== 'tab-map' && $(`.tabbar button[data-tab="${tab}"]`)) switchTab(tab);
+  const v = LS.get('mapView', null);
+  if (v && isFinite(v.lat) && isFinite(v.lng)) map.setView([v.lat, v.lng], v.z || CFG.DEFAULT_ZOOM, { animate: false });
+  const lp = LS.get('lastPoint', null);
+  if (lp && vkey()) {
+    if (lp.label === '내 위치') locateMe({ quiet: true, fallback: lp, keepView: !!v });
+    else checkAt(lp.lat, lp.lon, lp.label);
+  }
+})();
 
 /* ───────── PWA ───────── */
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
