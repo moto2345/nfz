@@ -507,8 +507,14 @@ function locateMe(opt = {}) {
     fab.classList.remove('locating'); fab.classList.add('found');
     const { latitude: lat, longitude: lon, accuracy } = p.coords;
     showMe(lat, lon, accuracy);
-    setViewVisible([lat, lon], opt.keepView ? map.getZoom() : Math.max(map.getZoom(), 14));
-    checkAt(lat, lon, '내 위치');
+    const z = opt.keepView ? map.getZoom() : Math.max(map.getZoom(), 14);
+    setViewVisible([lat, lon], z);
+    // 결과 창이 다 그려진 뒤, 내 위치를 보이는 지도 영역의 정중앙에 한 번 더 맞춤
+    Promise.resolve(checkAt(lat, lon, '내 위치')).then(() => setTimeout(() => {
+      if (!$('#tab-map').classList.contains('active')) return;
+      lastSheetH = sheet.offsetHeight || lastSheetH;
+      setViewVisible([lat, lon], map.getZoom());
+    }, 80));
   }, err => {
     fab.classList.remove('locating', 'found');
     if (opt.fallback) { checkAt(opt.fallback.lat, opt.fallback.lon, opt.fallback.label); return; }
@@ -519,10 +525,21 @@ $('#btnLocate').addEventListener('click', () => locateMe());
 
 /* ───────── 검색 & 즐겨찾기 ───────── */
 const resultsBox = $('#searchResults');
+// 목록을 왼쪽 확대·축소 버튼과 오른쪽 레이어 버튼 사이에 같은 간격으로 맞춤 (기종마다 버튼 크기가 달라 실제로 재서 계산)
+function fitDropdown() {
+  const GAP = 8, sb = $('.searchbar').getBoundingClientRect();
+  const zoom = document.querySelector('.leaflet-control-zoom'), layers = document.querySelector('.leaflet-control-layers');
+  let ml = 50, mr = 50;
+  if (zoom) ml = Math.max(0, zoom.getBoundingClientRect().right + GAP - sb.left);
+  if (layers) mr = Math.max(0, sb.right - (layers.getBoundingClientRect().left - GAP));
+  if (sb.width - ml - mr < 180) { ml = mr = 0; } // 화면이 너무 좁으면 전체 폭 사용
+  resultsBox.style.marginLeft = ml + 'px'; resultsBox.style.marginRight = mr + 'px';
+}
+function openDropdown() { fitDropdown(); resultsBox.classList.remove('hidden'); }
 // 검색창을 누르면: 최근 검색 + 저장한 장소
 function showFavorites() {
   const recent = LS.get('recentSearches', []), favs = LS.get('favorites', []);
-  if (!recent.length && !favs.length) { resultsBox.innerHTML = '<div class="item"><span>최근 검색 기록이 없습니다.</span></div>'; resultsBox.classList.remove('hidden'); return; }
+  if (!recent.length && !favs.length) { resultsBox.innerHTML = '<div class="item"><span>최근 검색 기록이 없습니다.</span></div>'; openDropdown(); return; }
   let h = '';
   if (recent.length) {
     h += '<div class="head">🕘 최근 검색<button type="button" class="head-btn" data-clear="1">전체 삭제</button></div>';
@@ -533,7 +550,7 @@ function showFavorites() {
     h += favs.map((f, i) => `<div class="item row" data-fav="${i}"><div class="grow"><b>${esc(f.name)}</b><span>${f.lat.toFixed(4)}, ${f.lon.toFixed(4)}</span></div><button type="button" class="x" data-delfav="${i}" aria-label="삭제">✕</button></div>`).join('');
   }
   resultsBox.innerHTML = h;
-  resultsBox.classList.remove('hidden');
+  openDropdown();
   resultsBox.querySelectorAll('[data-rec]').forEach(el => el.addEventListener('click', e => {
     if (e.target.closest('.x')) return; const x = recent[+el.dataset.rec]; addRecent(x); goTo(x.lat, x.lon, x.title);
   }));
@@ -580,7 +597,7 @@ $('#searchForm').addEventListener('submit', async e => {
   if (!q) return;
   if (!vkey()) return toast('검색하려면 V-World 인증키가 필요합니다.');
   resultsBox.innerHTML = '<div class="item"><span class="spinner"></span>검색 중…</div>';
-  resultsBox.classList.remove('hidden');
+  openDropdown();
   const list = await searchPlaces(q);
   if (!list.length) { resultsBox.innerHTML = '<div class="item"><span>검색 결과가 없습니다.</span></div>'; return; }
   resultsBox.innerHTML = list.map((x, i) => `<div class="item" data-i="${i}"><b>${esc(x.title)}</b><span>${esc(x.sub)}</span></div>`).join('');
