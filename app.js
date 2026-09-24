@@ -50,7 +50,20 @@ function toast(msg, ms = 2600) {
 
 // V-World는 CORS를 허용하지 않아 JSONP(callback)로 호출
 let jsonpSeq = 0;
-function jsonp(url, params, timeout = 15000) {
+// V-World에 동시에 너무 많이 요청하면 일부가 실패하므로 4개씩 나눠서 요청
+const JSONP_MAX = 4; let jsonpActive = 0; const jsonpQueue = [];
+function jsonp(url, params, timeout = 15000, retries = 1) {
+  return new Promise((resolve, reject) => {
+    const run = () => {
+      jsonpActive++;
+      jsonpRaw(url, params, timeout).then(resolve, err => {
+        if (retries > 0) jsonp(url, params, timeout, retries - 1).then(resolve, reject); else reject(err);
+      }).finally(() => { jsonpActive--; const next = jsonpQueue.shift(); if (next) next(); });
+    };
+    if (jsonpActive < JSONP_MAX) run(); else jsonpQueue.push(run);
+  });
+}
+function jsonpRaw(url, params, timeout) {
   return new Promise((resolve, reject) => {
     const cb = '__vw' + (++jsonpSeq) + '_' + Date.now();
     const s = document.createElement('script');
@@ -118,26 +131,32 @@ function propsTable(props) {
 }
 
 /* ───────── 공역 판정 ───────── */
-async function queryLayer(zone, bbox) {
+async function queryLayer(zone, bbox, retries = 1) {
   const res = await jsonp('https://api.vworld.kr/req/data', Object.assign(vwBase(), {
     service: 'data', request: 'GetFeature', version: '2.0', data: zone.id,
     size: '1000', page: '1', geometry: 'true', attribute: 'true', crs: 'EPSG:4326',
     geomFilter: `BOX(${bbox.join(',')})`
-  }));
+  }), 15000, retries);
   const r = res && res.response;
   if (!r) throw new Error('잘못된 응답');
   if (r.status === 'NOT_FOUND') return [];
-  if (r.status !== 'OK') throw new Error((r.error && (r.error.text || r.error.code)) || r.status);
+  if (r.status !== 'OK') { const e = new Error((r.error && (r.error.text || r.error.code)) || r.status); e.invalid = r.status === 'ERROR' && !/KEY|DOMAIN|AUTH|LIMIT/i.test(String(r.error && r.error.code)); throw e; }
   return (r.result && r.result.featureCollection && r.result.featureCollection.features) || [];
 }
 
 async function analyze(lat, lon) {
   const bbox = bboxAround(lat, lon, CFG.CHECK_RADIUS_M);
-  const settled = await Promise.allSettled(ZONES.map(z => queryLayer(z, bbox)));
+  const bad = LS.get('missingLayers', {}), now = Date.now();
+  const zones = ZONES.filter(z => !(z.optional && bad[z.id] && now - bad[z.id] < 7 * 864e5)); // 없는 레이어는 7일간 건너뜀
+  const settled = await Promise.allSettled(zones.map(z => queryLayer(z, bbox, z.optional ? 0 : 1)));
   const inside = [], nearby = [], failed = [];
   settled.forEach((s, i) => {
-    const zone = ZONES[i];
-    if (s.status === 'rejected') { if (!zone.optional) failed.push({ zone, error: s.reason && s.reason.message }); return; }
+    const zone = zones[i];
+    if (s.status === 'rejected') {
+      if (!zone.optional) failed.push({ zone, error: s.reason && s.reason.message });
+      else if (s.reason && s.reason.invalid) { const b = LS.get('missingLayers', {}); b[zone.id] = Date.now(); LS.set('missingLayers', b); }
+      return;
+    }
     markVerified(zone);
     for (const f of s.value) {
       const item = { zone, feature: f, label: featureLabel(f.properties) };
@@ -269,7 +288,7 @@ function weatherHtml(w) {
 
 /* ───────── 지도 ───────── */
 const map = L.map('map', { zoomControl: false, attributionControl: true }).setView(CFG.DEFAULT_CENTER, CFG.DEFAULT_ZOOM);
-L.control.zoom({ position: 'bottomleft' }).addTo(map);
+L.control.zoom({ position: 'topleft' }).addTo(map);
 let baseLayers = {}, overlayLayers = {}, layerCtl;
 
 function buildLayers() {

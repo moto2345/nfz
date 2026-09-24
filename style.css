@@ -35,8 +35,8 @@ a{color:var(--primary)}
 .tabbar button.active{color:var(--primary);font-weight:700}
 
 /* 지도 */
-#map{position:absolute;inset:0}
-.searchbar{position:absolute;top:0.625rem;left:0.75rem;right:0.75rem;z-index:900}
+#map{position:absolute;inset:0;z-index:0;isolation:isolate}
+.searchbar{position:absolute;top:0.625rem;left:0.75rem;right:0.75rem;z-index:900;transform:translateZ(0)}
 .searchbar form{display:flex;background:var(--card);border-radius:0.75rem;box-shadow:0 0.125rem 0.625rem rgba(0,0,0,.18);overflow:hidden}
 .searchbar input{flex:1;border:0;padding:0.75rem 0.875rem;background:transparent;outline:none;min-width:0;font-size:1rem}
 .searchbar button{border:0;background:none;padding:0 0.875rem;font-size:1.125rem}
@@ -46,17 +46,17 @@ a{color:var(--primary)}
 .dropdown .item b{display:block;font-size:0.9375rem}
 .dropdown .item span{font-size:0.75rem;color:var(--muted)}
 .dropdown .head{padding:0.5rem 0.875rem;font-size:0.75rem;color:var(--muted);background:var(--bg)}
-.fab-col{position:absolute;right:0.75rem;bottom:calc(var(--sheet-h,7.5rem) + 1.75rem);z-index:800;display:flex;flex-direction:column;gap:0.625rem;transition:bottom .2s}
+.fab-col{position:absolute;right:0.75rem;bottom:calc(var(--sheet-h,7.5rem) + 1.75rem);z-index:800;display:flex;flex-direction:column;gap:0.625rem;transform:translateZ(0)}
 .fab{width:3.5rem;height:3.5rem;padding:0;border-radius:50%;border:0;background:#fff;color:#1a73e8;box-shadow:0 0.125rem 0.625rem rgba(0,0,0,.25);display:grid;place-items:center;cursor:pointer;-webkit-tap-highlight-color:transparent}
 .fab svg{width:1.75rem;height:1.75rem;display:block}
 .fab:active{background:#eef3fd}
 .fab.locating svg{animation:locate-pulse 1s ease-in-out infinite}
 .fab.found{color:#1a73e8;background:#e8f0fe}
 @keyframes locate-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.88)}}
-.leaflet-top.leaflet-right{top:4rem}
+.leaflet-top{top:4.25rem}
 
 /* 하단 시트 */
-.sheet{position:absolute;left:0;right:0;bottom:0;z-index:850;background:var(--card);border-radius:1.125rem 1.125rem 0 0;
+.sheet{position:absolute;left:0;right:0;bottom:0;z-index:850;transform:translateZ(0);will-change:transform;background:var(--card);border-radius:1.125rem 1.125rem 0 0;
   box-shadow:0 -4px 1.125rem rgba(0,0,0,.18);max-height:62%;display:flex;flex-direction:column}
 .sheet.collapsed #sheetBody{max-height:5.75rem;overflow:hidden}
 .sheet-handle{width:2.75rem;height:0.3125rem;border-radius:0.1875rem;background:var(--line);margin:0.5rem auto 0.125rem;flex:none;cursor:pointer}
@@ -169,13 +169,12 @@ a.btn{text-decoration:none;color:var(--primary)}
 .dropdown .x:active{background:var(--line)}
 
 /* 지도 확대·축소 버튼과 출처 표시가 하단 시트에 가리지 않게 */
-.leaflet-bottom{bottom:var(--sheet-h,7.5rem)!important;transition:bottom .2s}
+.leaflet-bottom.leaflet-right{bottom:var(--sheet-h,7.5rem)!important}
 /* 태블릿·가로 화면: 하단 시트와 검색창 폭 제한 */
 @media (min-width:700px){
   .sheet{left:12px;right:auto;width:440px;border-radius:18px 18px 0 0}
   .searchbar{right:auto;width:440px}
   .page{max-width:760px;margin:0 auto;left:0;right:0}
-  .leaflet-bottom.leaflet-left{left:452px}
-  .leaflet-bottom{bottom:0!important}
+  .leaflet-bottom.leaflet-right{bottom:0!important}
   .fab-col{bottom:2.5rem}
 }
