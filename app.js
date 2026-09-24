@@ -320,6 +320,7 @@ function sheetHtml(html) { $('#sheetBody').innerHTML = html; sheet.classList.rem
 let checkSeq = 0;
 async function checkAt(lat, lon, label) {
   const seq = ++checkSeq;
+  if (label !== '내 위치') $('#btnLocate').classList.remove('found');
   if (!vkey()) {
     sheetHtml(`<div class="verdict v-gray"><div class="ico">🔑</div><div><b>인증키가 필요합니다</b><small>config.js에 V-World 인증키를 넣어주세요.</small></div></div>`);
     return;
@@ -443,13 +444,16 @@ function showMe(lat, lon, accuracy) {
 function locateMe(opt = {}) {
   if (!navigator.geolocation) { if (opt.fallback) checkAt(opt.fallback.lat, opt.fallback.lon, opt.fallback.label); else toast('이 기기는 위치 기능을 지원하지 않습니다.'); return; }
   if (!opt.quiet) toast('현재 위치를 찾는 중…');
+  const fab = $('#btnLocate'); fab.classList.add('locating');
   navigator.geolocation.getCurrentPosition(p => {
+    fab.classList.remove('locating'); fab.classList.add('found');
     const { latitude: lat, longitude: lon, accuracy } = p.coords;
     showMe(lat, lon, accuracy);
     if (!opt.keepView) map.setView([lat, lon], Math.max(map.getZoom(), 14));
     else map.panTo([lat, lon]);
     checkAt(lat, lon, '내 위치');
   }, err => {
+    fab.classList.remove('locating', 'found');
     if (opt.fallback) { checkAt(opt.fallback.lat, opt.fallback.lon, opt.fallback.label); return; }
     toast(err.code === 1 ? '위치 권한이 거부되었습니다. 브라우저 설정에서 허용해 주세요.' : '위치를 가져오지 못했습니다.');
   }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 });

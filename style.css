@@ -44,7 +44,12 @@ a{color:var(--primary)}
 .dropdown .item span{font-size:12px;color:var(--muted)}
 .dropdown .head{padding:8px 14px;font-size:12px;color:var(--muted);background:var(--bg)}
 .fab-col{position:absolute;right:12px;bottom:calc(var(--sheet-h,120px) + 14px);z-index:800;display:flex;flex-direction:column;gap:10px;transition:bottom .2s}
-.fab{width:50px;height:50px;border-radius:50%;border:0;background:var(--card);box-shadow:0 2px 10px rgba(0,0,0,.25);font-size:22px}
+.fab{width:56px;height:56px;padding:0;border-radius:50%;border:0;background:#fff;color:#1a73e8;box-shadow:0 2px 10px rgba(0,0,0,.25);display:grid;place-items:center;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.fab svg{width:28px;height:28px;display:block}
+.fab:active{background:#eef3fd}
+.fab.locating svg{animation:locate-pulse 1s ease-in-out infinite}
+.fab.found{color:#1a73e8;background:#e8f0fe}
+@keyframes locate-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.88)}}
 .leaflet-top.leaflet-right{top:64px}
 
 /* 하단 시트 */

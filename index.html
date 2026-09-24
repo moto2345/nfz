@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="하코 NFZ">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-  <link rel="stylesheet" href="style.css?v=9">
+  <link rel="stylesheet" href="style.css?v=10">
 </head>
 <body>
 
@@ -20,7 +20,7 @@
 <header class="appbar">
   <img src="icons/icon-192.png" alt="" class="appbar-logo">
   <h1>하코 NFZ 조회</h1>
-  <span class="badge">웹버전 v1.9</span>
+  <span class="badge">웹버전 v1.10</span>
   <button id="btnRefresh" class="appbar-btn" type="button" aria-label="새로고침" title="새로고침">
     <svg class="ico-refresh" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     <svg class="ico-spin" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
@@ -40,7 +40,9 @@
   </div>
 
   <div class="fab-col">
-    <button id="btnLocate" class="fab" title="내 위치 확인">📍</button>
+    <button id="btnLocate" class="fab" type="button" aria-label="내 위치 확인" title="내 위치 확인">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 3v3.5M12 17.5V21M3 12h3.5M17.5 12H21" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="12" r="1.9" fill="currentColor"/></svg>
+    </button>
   </div>
 
   <div id="timerBanner" class="timer-banner hidden">
@@ -51,7 +53,7 @@
   <div id="sheet" class="sheet">
     <div class="sheet-handle" id="sheetHandle"></div>
     <div id="sheetBody">
-      <div class="hint">📍 버튼으로 내 위치를 확인하거나<br>지도를 눌러 원하는 지점의 비행 가능 여부를 확인하세요.</div>
+      <div class="hint">⌖ 버튼으로 내 위치를 확인하거나<br>지도를 눌러 원하는 지점의 비행 가능 여부를 확인하세요.</div>
     </div>
   </div>
 </section>
@@ -194,7 +196,7 @@
 <div id="toast" class="toast hidden"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="config.js?v=9"></script>
-<script src="app.js?v=9"></script>
+<script src="config.js?v=10"></script>
+<script src="app.js?v=10"></script>
 </body>
 </html>
