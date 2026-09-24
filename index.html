@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="하코 NFZ">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-  <link rel="stylesheet" href="style.css?v=5">
+  <link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
 
@@ -20,7 +20,7 @@
 <header class="appbar">
   <img src="icons/icon-192.png" alt="" class="appbar-logo">
   <h1>하코 NFZ 조회</h1>
-  <span class="badge">웹버전 v1.5</span>
+  <span class="badge">웹버전 v1.6</span>
 </header>
 
 <!-- ═════════ 지도 탭 ═════════ -->
@@ -93,10 +93,11 @@
   <div class="card">
     <b>판정 색상</b>
     <ul class="legend">
-      <li><i style="background:#e53935"></i>비행금지구역 · 관제권 — 승인 없이 비행 불가</li>
-      <li><i style="background:#fb8c00"></i>비행제한구역 · 위험구역 — 승인 필요</li>
-      <li><i style="background:#fdd835"></i>군작전구역 — 비행 전 확인 권장</li>
-      <li><i style="background:#43a047"></i>초경량비행장치 공역 · 일반 공역 — 기본 수칙 지키면 비행 가능</li>
+      <li><i style="background:#e53935"></i>비행금지구역 · 관제권 · 임시비행금지구역 — 승인 없이 비행 불가</li>
+      <li><i style="background:#fb8c00"></i>비행제한구역 · 위험구역 · 비행장교통구역 — 비행승인 필요</li>
+      <li><i style="background:#fdd835"></i>군작전구역 · 경계구역 · 국립공원 — 비행 전 확인 권장</li>
+      <li><i style="background:#43a047"></i>초경량비행장치 공역 · 일반 공역 — 비행승인 불필요 (조종자 준수사항 준수)</li>
+      <li><i style="background:#fdd835"></i>🌙 노란색이 날씨·야간 때문이면 "공역은 가능 · 지금은 야간"처럼 표시</li>
     </ul>
   </div>
 
@@ -107,9 +108,38 @@
       <li>일몰 후~일출 전 야간 비행 금지 (특별비행승인 시 예외)</li>
       <li>사람이 많이 모인 곳(행사장, 경기장 등) 상공 비행 금지</li>
       <li>음주 상태 비행 금지, 비행 중 물건 투하 금지</li>
+      <li>비행승인 대상 지역에서 승인 없이 비행하면 과태료 150만원(1차 위반)</li>
       <li>공항 주변 관제권, 휴전선 인근, 서울 도심 등은 승인 필요</li>
       <li>사진·영상 촬영은 비행승인과 별도로 항공촬영 허가가 필요할 수 있음</li>
       <li>기체 무게에 따라 조종자 증명·기체 신고 대상이 달라지니 드론 원스톱에서 확인</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <b>드론 원스톱 신청 종류 · 처리 기간 (평일 기준)</b>
+    <table class="tbl">
+      <tr><td>비행승인</td><td>3일</td><td>금지·제한구역, 관제권 등에서 비행할 때</td></tr>
+      <tr><td>항공촬영 허가</td><td>4일</td><td>사진·영상 촬영 시 (비행승인과 별도)</td></tr>
+      <tr><td>특별비행 승인</td><td>30일</td><td>야간 비행, 가시권 밖 비행</td></tr>
+      <tr><td>비행장치 신고</td><td>7일</td><td>신고 대상 기체</td></tr>
+      <tr><td>사업등록</td><td>14일</td><td>드론으로 영업할 때</td></tr>
+    </table>
+    <p class="muted small">비행 날짜에 맞춰 여유 있게 신청하세요. 기간은 드론 원스톱 안내 기준이며 바뀔 수 있습니다.</p>
+    <div class="row-btns"><a class="btn sm" href="https://drone.onestop.go.kr" target="_blank" rel="noopener">드론 원스톱 바로가기</a></div>
+  </div>
+
+  <div class="card">
+    <b>허가와 별도로 사전 협의가 필요한 곳</b>
+    <p>사유지, 해수욕장, 국립공원, 문화재, 교도소, 군부대, 국가중요시설, 항만 등은 소유자나 관리사무소가 있으면 <b>반드시 미리 협의</b>하세요. 공역상 비행승인이 필요 없는 곳이어도 마찬가지입니다.</p>
+  </div>
+
+  <div class="card">
+    <b>신고 · 문의 전화</b>
+    <ul>
+      <li>추락한 무인기나 불법 운용이 의심되는 드론을 보면 국가정보원 <a href="tel:111">111</a> · 경찰 <a href="tel:112">112</a> · 군부대 <a href="tel:1338">1338</a></li>
+      <li>드론 원스톱 기체 신고 문의 <a href="tel:0544597942">054-459-7942</a></li>
+      <li>드론 원스톱 시스템 장애 문의 <a href="tel:0544597412">054-459-7412</a></li>
+      <li>비행승인·항공촬영 담당 부서는 지역마다 다르니 드론 원스톱의 "민원 처리 부서 안내"에서 확인하세요.</li>
     </ul>
   </div>
 
@@ -171,7 +201,7 @@
 <div id="toast" class="toast hidden"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="config.js?v=5"></script>
-<script src="app.js?v=5"></script>
+<script src="config.js?v=6"></script>
+<script src="app.js?v=6"></script>
 </body>
 </html>

@@ -136,3 +136,8 @@ a.btn{text-decoration:none;color:var(--primary)}
 .spinner{display:inline-block;width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--primary);border-radius:50%;animation:spin .8s linear infinite;vertical-align:-3px;margin-right:6px}
 @keyframes spin{to{transform:rotate(360deg)}}
 .leaflet-control-layers{font-size:13px}
+
+.tbl{width:100%;border-collapse:collapse;margin-top:8px;font-size:13px}
+.tbl td{padding:7px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+.tbl td:first-child{font-weight:700;white-space:nowrap}
+.tbl td:nth-child(2){color:var(--primary);font-weight:700;white-space:nowrap}

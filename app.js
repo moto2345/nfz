@@ -17,10 +17,22 @@ const ZONES = [
   { id: 'LT_C_AISPRHC', name: '비행금지구역', level: 3, color: '#e53935', note: '비행승인 없이 비행 불가' },
   { id: 'LT_C_AISCTRC', name: '관제권(공항 주변)', level: 3, color: '#d81b60', note: '원칙적으로 비행승인 필요' },
   { id: 'LT_C_AISRESC', name: '비행제한구역', level: 2, color: '#fb8c00', note: '비행승인 필요' },
-  { id: 'LT_C_AISDNGC', name: '위험구역', level: 2, color: '#f4511e', note: '비행승인 필요', optional: true },
-  { id: 'LT_C_AISMOAC', name: '군작전구역', level: 1, color: '#fdd835', note: '군 작전 공역 — 비행 전 확인 권장' },
-  { id: 'LT_C_AISUAC',  name: '초경량비행장치 공역', level: 0, color: '#43a047', note: '초경량비행장치 비행 공역' }
+  { id: 'LT_C_AISDNGC', name: '위험구역', level: 2, color: '#f4511e', note: '비행승인 필요' },
+  { id: 'LT_C_AISMOAC', name: '군작전구역', level: 1, color: '#fdd835', note: '군 작전 공역 — 비행 전 확인 권장', off: true },
+  { id: 'LT_C_AISUAC',  name: '초경량비행장치 공역', level: 0, color: '#43a047', note: '초경량비행장치 비행 공역' },
+  // ↓ V-World에 있는지 확인되지 않은 레이어: 조회에 성공한 경우에만 사용·표시
+  { id: 'LT_C_AISTEMP', name: '임시비행금지구역', level: 3, color: '#b71c1c', note: '행사·훈련 등으로 임시 지정 — 비행 불가', optional: true },
+  { id: 'LT_C_AISATZC', name: '비행장교통구역', level: 2, color: '#8d6e63', note: '비행장 주변 — 비행승인 필요', optional: true },
+  { id: 'LT_C_AISALTC', name: '경계구역', level: 1, color: '#a1887f', note: '훈련 등 경계 공역 — 비행 전 확인 권장', optional: true, off: true },
+  { id: 'LT_C_WGISNPGUG', name: '국립공원', level: 1, color: '#2e7d32', note: '국립공원 — 공원사무소 사전 허가 필요', optional: true, off: true },
+  { id: 'LT_C_AISDRONEZONE', name: '드론시범사업구역', level: 0, color: '#00897b', note: '드론 실증·시범사업 구역', optional: true, off: true }
 ];
+const verified = new Set(LS.get('verifiedLayers', []));
+function markVerified(z) {
+  if (!z.optional || verified.has(z.id)) return;
+  verified.add(z.id); LS.set('verifiedLayers', [...verified]);
+  addZoneOverlay(z);
+}
 
 /* ───────── 공통 유틸 ───────── */
 const $ = (s, r = document) => r.querySelector(s);
@@ -125,6 +137,7 @@ async function analyze(lat, lon) {
   settled.forEach((s, i) => {
     const zone = ZONES[i];
     if (s.status === 'rejected') { if (!zone.optional) failed.push({ zone, error: s.reason && s.reason.message }); return; }
+    markVerified(zone);
     for (const f of s.value) {
       const item = { zone, feature: f, label: featureLabel(f.properties) };
       if (containsPoint(f.geometry, lon, lat)) { item.dist = 0; inside.push(item); }
@@ -148,18 +161,20 @@ function makeVerdict(inside, nearby, failed) {
   }
   if (top === 3) {
     const names = [...new Set(inside.filter(x => x.zone.level === 3).map(x => x.zone.name))].join(', ');
-    return { cls: 'v-red', ico: '⛔', title: '비행 불가 (승인 필요)', desc: `${names} 안입니다. 드론 원스톱에서 비행승인을 받아야 합니다.`, code: 'no' };
+    return { cls: 'v-red', ico: '⛔', title: '비행 불가 (승인 필요)', desc: `${names} 안입니다. 드론 원스톱에서 비행승인을 받아야 합니다. (승인 없이 비행 시 과태료 150만원, 1차 위반 기준)`, code: 'no' };
   }
   if (top === 2) {
     const names = [...new Set(inside.filter(x => x.zone.level === 2).map(x => x.zone.name))].join(', ');
-    return { cls: 'v-orange', ico: '⚠️', title: '비행승인 필요', desc: `${names} 안입니다. 승인 없이 비행하면 안 됩니다.`, code: 'approval' };
+    return { cls: 'v-orange', ico: '⚠️', title: '비행승인 필요', desc: `${names} 안입니다. 드론 원스톱에서 비행승인을 받아야 합니다. (승인 없이 비행 시 과태료 150만원, 1차 위반 기준)`, code: 'approval' };
   }
   if (top === 1) {
-    return { cls: 'v-yellow', ico: '🟡', title: '주의 — 확인 후 비행', desc: '군작전구역 안입니다. 150m 미만 취미 비행도 비행 전 드론 원스톱에서 확인하세요.', code: 'caution' };
+    const names = [...new Set(inside.filter(x => x.zone.level === 1).map(x => x.zone.name))].join(', ');
+    const park = has('LT_C_WGISNPGUG') ? ' 국립공원 안에서는 공원사무소 허가가 필요합니다.' : '';
+    return { cls: 'v-yellow', ico: '🟡', title: '주의 — 확인 후 비행', desc: `${names} 안입니다.${park} 비행 전 드론 원스톱에서 확인하세요.`, code: 'caution' };
   }
   const base = has('LT_C_AISUAC') ? '초경량비행장치 공역입니다.' : '확인된 비행금지·제한 공역이 없습니다.';
-  const warn = near && near.dist < 1000 ? ` 단, ${fmtDist(near.dist)} 옆에 ${near.zone.name}이 있으니 넘어가지 않게 주의하세요.` : ' 기본 수칙(150m 미만·주간·가시권)을 지키면 비행할 수 있습니다.';
-  return { cls: 'v-green', ico: '✅', title: '비행 가능', desc: base + warn, code: 'ok', nearNote: near && near.dist < 1000 ? `${fmtDist(near.dist)} 옆에 ${near.zone.name}이 있습니다.` : '' };
+  const warn = ' 조종자 준수사항(주간·25kg 이하·150m 미만·가시권)을 지키면 비행할 수 있습니다.' + (near && near.dist < 1000 ? ` 단, ${fmtDist(near.dist)} 옆에 ${near.zone.name}이 있으니 넘어가지 않게 주의하세요.` : '');
+  return { cls: 'v-green', ico: '✅', title: '비행 가능 · 비행승인 불필요', desc: base + warn, code: 'ok', nearNote: near && near.dist < 1000 ? `${fmtDist(near.dist)} 옆에 ${near.zone.name}이 있습니다.` : '' };
 }
 
 /* ───────── 주소 ───────── */
@@ -266,19 +281,24 @@ function buildLayers() {
     baseLayers['기본지도'] = vw('Base', 'png');
     const sat = vw('Satellite', 'jpeg'), hyb = vw('Hybrid', 'png');
     baseLayers['위성지도'] = L.layerGroup([sat, hyb]);
-    for (const z of ZONES) {
-      const wms = L.tileLayer.wms('https://api.vworld.kr/req/wms', {
-        layers: z.id.toLowerCase(), styles: z.id.toLowerCase(), format: 'image/png', transparent: true,
-        version: '1.3.0', key, domain: location.origin, opacity: z.level === 0 ? 0.45 : 0.55, maxZoom: 19
-      });
-      overlayLayers[`<span style="color:${z.color}">■</span> ${z.name}`] = wms;
-      if (z.id !== 'LT_C_AISMOAC') wms.addTo(map); // 군작전구역은 범위가 넓어 기본 꺼짐
-    }
   } else {
     baseLayers['OpenStreetMap'] = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' });
   }
   const firstBase = Object.values(baseLayers)[0]; firstBase.addTo(map);
-  layerCtl = L.control.layers(baseLayers, overlayLayers, { position: 'topright', collapsed: true }).addTo(map);
+  layerCtl = L.control.layers(baseLayers, {}, { position: 'topright', collapsed: true }).addTo(map);
+  if (key) for (const z of ZONES) if (!z.optional || verified.has(z.id)) addZoneOverlay(z);
+}
+function addZoneOverlay(z) {
+  const key = vkey(); if (!key || !layerCtl) return;
+  const label = `<span style="color:${z.color}">■</span> ${z.name}`;
+  if (overlayLayers[label]) return;
+  const wms = L.tileLayer.wms('https://api.vworld.kr/req/wms', {
+    layers: z.id.toLowerCase(), styles: z.id.toLowerCase(), format: 'image/png', transparent: true,
+    version: '1.3.0', key, domain: location.origin, opacity: z.level === 0 ? 0.45 : 0.55, maxZoom: 19
+  });
+  overlayLayers[label] = wms;
+  layerCtl.addOverlay(wms, label);
+  if (!z.off) wms.addTo(map); // 범위가 넓은 구역은 기본 꺼짐
 }
 buildLayers();
 
@@ -366,6 +386,7 @@ function renderResult(r) {
       <button class="btn sm" id="btnFav">☆ 장소 저장</button>
       <button class="btn sm" id="btnLogHere">📒 기록 추가</button>
       <button class="btn sm" id="btnFlyStart">⏱ 비행 시작</button>
+      <button class="btn sm" id="btnCopy">📋 좌표·주소 복사</button>
       <a class="btn sm" href="https://drone.onestop.go.kr" target="_blank" rel="noopener">드론원스톱</a>
     </div>`;
   if (r.inside.length) h += `<div class="section-title">이 지점이 속한 공역</div>` + r.inside.map(x => zoneRow(x, false)).join('');
@@ -378,6 +399,27 @@ function renderResult(r) {
   $('#btnFav').onclick = () => addFavorite(r);
   $('#btnLogHere').onclick = () => openLogForm({ fromResult: r });
   $('#btnFlyStart').onclick = () => startTimer();
+  $('#btnCopy').onclick = () => copyPoint(r);
+}
+
+// 비행승인·촬영허가 신청서에 붙여넣기 좋게 정리
+async function copyPoint(r) {
+  const dms = v => { const t = Math.round(Math.abs(v) * 36000) / 10, d = Math.floor(t / 3600), m = Math.floor((t - d * 3600) / 60), sec = (t - d * 3600 - m * 60).toFixed(1); return `${d}°${m}'${sec}"`; };
+  const zones = [...new Set(r.inside.map(x => x.zone.name + (x.label ? ` (${x.label})` : '')))].join(', ') || '해당 없음';
+  const text = [
+    `주소: ${(r.addr && (r.addr.road || r.addr.parcel)) || r.label || '-'}`,
+    r.addr && r.addr.road && r.addr.parcel ? `지번: ${r.addr.parcel}` : '',
+    `좌표: ${r.lat.toFixed(6)}, ${r.lon.toFixed(6)}`,
+    `좌표(도분초): N ${dms(r.lat)} / E ${dms(r.lon)}`,
+    `해당 공역: ${zones}`,
+    `판정: ${r.verdict.title}`
+  ].filter(Boolean).join('\n');
+  try {
+    if (navigator.share && /Android|iPhone|iPad/i.test(navigator.userAgent)) { await navigator.share({ title: '비행 지점', text }); return; }
+    await navigator.clipboard.writeText(text); toast('복사했습니다. 비행승인 신청서에 붙여넣으세요.');
+  } catch (e) {
+    try { await navigator.clipboard.writeText(text); toast('복사했습니다.'); } catch (e2) { prompt('아래 내용을 복사하세요', text); }
+  }
 }
 
 function drawZones(r) {
@@ -618,7 +660,8 @@ const CHECKS = [
   ['공역·허가', [
     '비행 지점이 비행금지·제한구역, 관제권이 아닌지 확인',
     '필요하면 드론 원스톱에서 비행승인·촬영허가 받음',
-    '기체 무게에 맞는 조종자 증명·기체 신고 여부 확인'
+    '기체 무게에 맞는 조종자 증명·기체 신고 여부 확인',
+    '사유지·공원·문화재 등은 관리자와 사전 협의'
   ]],
   ['날씨·현장', [
     '풍속·돌풍이 기체 한계 이내인지 확인',
