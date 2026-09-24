@@ -1,5 +1,5 @@
 // 앱 화면(껍데기)만 캐시 — 공역·날씨 데이터는 항상 새로 받아옵니다.
-const CACHE = 'dronezone-v10';
+const CACHE = 'dronezone-v11';
 const SHELL = ['./', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png',
   'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css',
