@@ -37,7 +37,7 @@ a{color:var(--primary)}
 .searchbar form{display:flex;background:var(--card);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.18);overflow:hidden}
 .searchbar input{flex:1;border:0;padding:10px 11px;background:transparent;outline:none;min-width:0;font-size:13px}
 .searchbar button{border:0;background:none;padding:0 11px;font-size:14px}
-.dropdown{margin-top:5px;background:var(--card);border-radius:10px;box-shadow:0 3px 13px rgba(0,0,0,.2);max-height:50vh;overflow-y:auto}
+.dropdown{margin:5px 50px 0;background:var(--card);border-radius:10px;box-shadow:0 3px 13px rgba(0,0,0,.2);max-height:50vh;overflow-y:auto}
 .dropdown .item{padding:9px 11px;border-bottom:1px solid var(--line);cursor:pointer}
 .dropdown .item:last-child{border-bottom:0}
 .dropdown .item b{display:block;font-size:12px}
