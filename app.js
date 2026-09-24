@@ -527,8 +527,10 @@ $('#searchForm').addEventListener('submit', async e => {
 
 /* ───────── 새로고침 버튼 ───────── */
 $('#btnRefresh').addEventListener('click', () => {
-  $('#btnRefresh').classList.add('spin');
-  setTimeout(() => location.reload(), 150); // 이전 화면·지점은 복원 기능으로 다시 판정됨
+  const btn = $('#btnRefresh');
+  if (btn.classList.contains('loading')) return;
+  btn.classList.add('loading');
+  setTimeout(() => location.reload(), 600); // 이전 화면·지점은 복원 기능으로 다시 판정됨
 });
 
 /* ───────── 탭 ───────── */

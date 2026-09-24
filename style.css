@@ -142,9 +142,16 @@ a.btn{text-decoration:none;color:var(--primary)}
 .tbl td:first-child{font-weight:700;white-space:nowrap}
 .tbl td:nth-child(2){color:var(--primary);font-weight:700;white-space:nowrap}
 
-.appbar-btn{margin-left:auto;width:40px;height:40px;border:0;border-radius:50%;background:rgba(255,255,255,.15);color:#fff;font-size:24px;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.appbar-btn{margin-left:auto;flex:none;width:40px;height:40px;padding:0;border:0;border-radius:50%;background:rgba(255,255,255,.15);color:#fff;display:grid;place-items:center;cursor:pointer;-webkit-tap-highlight-color:transparent}
 .appbar-btn:active{background:rgba(255,255,255,.3)}
-.appbar-btn.spin{animation:spin .6s linear infinite}
+.appbar-btn svg{grid-area:1/1;width:24px;height:24px;display:block}
+.appbar-btn .ico-spin{display:none}
+/* 윈도우11 스타일 로딩: 선이 늘었다 줄었다 하며 회전 */
+.appbar-btn.loading .ico-refresh{display:none}
+.appbar-btn.loading .ico-spin{display:block;animation:w11-rotate 1.4s linear infinite}
+.appbar-btn.loading .ico-spin circle{stroke-dasharray:1 60;stroke-dashoffset:0;animation:w11-dash 1.4s ease-in-out infinite}
+@keyframes w11-rotate{to{transform:rotate(360deg)}}
+@keyframes w11-dash{0%{stroke-dasharray:1 60;stroke-dashoffset:0}50%{stroke-dasharray:38 60;stroke-dashoffset:-10}100%{stroke-dasharray:38 60;stroke-dashoffset:-53}}
 .dropdown .head{display:flex;justify-content:space-between;align-items:center}
 .searchbar .head-btn{border:0;background:none;color:var(--primary);font-size:12px;padding:0;cursor:pointer}
 .dropdown .item.row{display:flex;align-items:center;gap:8px}
