@@ -174,6 +174,16 @@ async function analyze(lat, lon) {
       }
     }
   });
+  // 항공고시보(NOTAM): 진행 중인 구역 안이면 비행 불가, 곧 시작하면 주의로 안내
+  await Promise.race([notamReady, new Promise(r => setTimeout(r, 4000))]);
+  for (const it of notamList()) {
+    if (!it.geometry) continue;
+    const st = notamStatus(it);
+    const zone = st === 'active' ? NOTAM_ZONE : NOTAM_SOON_ZONE;
+    const item = { zone, feature: notamFeature(it), label: `${it.no} · ${notamPeriod(it)}`, notam: it };
+    if (containsPoint(it.geometry, lon, lat)) { item.dist = 0; (st === 'active' ? inside : nearby).push(item); }
+    else { item.dist = distToBoundary(it.geometry, lon, lat); if (item.dist <= CFG.CHECK_RADIUS_M) nearby.push(item); }
+  }
   inside.sort((a, b) => b.zone.level - a.zone.level);
   nearby.sort((a, b) => a.dist - b.dist);
   return { lat, lon, inside, nearby, failed, verdict: makeVerdict(inside, nearby, failed) };
@@ -206,8 +216,13 @@ function makeVerdict(inside, nearby, failed) {
     return { cls: 'v-yellow', ico: '🟡', title: '주의 — 확인 후 비행', desc: `${names} 안입니다.${park} 비행 전 드론 원스톱에서 확인하세요.`, code: 'caution' };
   }
   const base = has('LT_C_AISUAC') ? '초경량비행장치 공역입니다.' : '확인된 비행금지·제한 공역이 없습니다.';
-  const warn = ' 조종자 준수사항(주간·25kg 이하·150m 미만·가시권)을 지키면 비행할 수 있습니다.' + (near && near.dist < 1000 ? ` 단, ${fmtDist(near.dist)} 옆에 ${near.zone.name}이 있으니 넘어가지 않게 주의하세요.` : '');
-  return { cls: 'v-green', ico: '✅', title: '비행 가능 · 비행승인 불필요', desc: base + warn, code: 'ok', nearNote: near && near.dist < 1000 ? `${fmtDist(near.dist)} 옆에 ${near.zone.name}이 있습니다.` : '' };
+  // 이 지점이 곧 시작될 항공고시보 구역 안이면 따로 알림
+  const soon = nearby.find(x => x.notam && x.dist === 0);
+  const soonNote = soon ? `이 지점은 ${notamPeriod(soon.notam)} 임시비행금지(항공고시보 ${soon.notam.no}) 예정입니다.` : '';
+  const near1 = nearby.find(x => !(x.notam && x.dist === 0));
+  const nearTxt = near1 && near1.dist < 1000 ? `${fmtDist(near1.dist)} 옆에 ${near1.zone.name}이 있습니다.` : '';
+  const warn = ' 조종자 준수사항(주간·25kg 이하·150m 미만·가시권)을 지키면 비행할 수 있습니다.' + (nearTxt ? ` 단, ${nearTxt.replace('있습니다.', '있으니 넘어가지 않게 주의하세요.')}` : '') + (soonNote ? ' ⚠️ ' + soonNote : '');
+  return { cls: 'v-green', ico: '✅', title: '비행 가능 · 비행승인 불필요', desc: base + warn, code: 'ok', nearNote: [nearTxt, soonNote].filter(Boolean).join(' ') };
 }
 
 /* ───────── 주소 ───────── */
@@ -499,7 +514,7 @@ function zoneRow(x, showDist) {
   return `<div class="zone">${swatch(x.zone)}
     <div class="z-main"><div class="z-name">${esc(x.zone.name)}</div>
       <div class="z-sub">${esc(x.label || x.zone.note)}</div>${propsTable(x.feature.properties)}</div>
-    ${showDist ? `<div class="z-dist">${fmtDist(x.dist)}</div>` : ''}</div>`;
+    ${showDist ? `<div class="z-dist">${x.dist === 0 ? '이 지점' : fmtDist(x.dist)}</div>` : ''}</div>`;
 }
 
 function renderResult(r) {
@@ -881,6 +896,122 @@ function renderChecks() {
 $('#btnCheckReset').addEventListener('click', () => { LS.set('checks', {}); renderChecks(); });
 renderChecks();
 
+/* ───────── 항공고시보(NOTAM) — 드론 관련만 ───────── */
+// GitHub 자동 작업이 30분마다 국토부 xNOTAM에서 가져와 notam.json으로 저장해 둔 것을 읽음
+const NOTAM_URLS = ['https://raw.githubusercontent.com/moto2345/nfz/main/notam.json', 'notam.json'];
+const NOTAM_ZONE = { id: 'NOTAM', name: '임시비행금지(항공고시보)', level: 3, color: '#c62828', pat: 'hatch', note: '항공고시보(NOTAM)로 지정된 임시 구역' };
+const NOTAM_SOON_ZONE = { id: 'NOTAM', name: '임시비행금지 예정(항공고시보)', level: 1, color: '#ef6c00', pat: 'hatch', note: '곧 시작되는 항공고시보 구역' };
+let notamData = null, notamLayer = null;
+const kst = iso => new Date(Date.parse(iso) + 9 * 3600e3);
+const fmtKST = iso => { const k = kst(iso); return `${k.getUTCMonth() + 1}/${k.getUTCDate()} ${pad(k.getUTCHours())}:${pad(k.getUTCMinutes())}`; };
+const todayKST = () => kst(new Date().toISOString()).toISOString().slice(0, 10);
+function notamStatus(it, now = Date.now()) {
+  const s = it.start ? Date.parse(it.start) : 0, e = it.end ? Date.parse(it.end) : Infinity;
+  return now < s ? 'upcoming' : now > e ? 'ended' : 'active';
+}
+function notamList() { return ((notamData && notamData.items) || []).filter(it => notamStatus(it) !== 'ended'); }
+function notamPeriod(it) {
+  return `${it.start ? fmtKST(it.start) : '지금'} ~ ${it.end ? fmtKST(it.end) + (it.endEst ? '(예상)' : '') : '별도 공지 시까지'}`;
+}
+// D)항목의 시간(UTC)을 한국시간으로 (예: 0900-2200 → 18:00-07:00)
+function scheduleKST(s) {
+  if (!s) return '';
+  const t = (h, mi) => `${pad((+h + 9) % 24)}:${mi}`;
+  const out = s.replace(/\b([01]\d|2[0-3])([0-5]\d)\s*-\s*([01]\d|2[0-4])([0-5]\d)\b/g, (m, h1, m1, h2, m2) => `${t(h1, m1)}-${t(h2, m2)}`);
+  return out === s ? s : out + ' (한국시간)';
+}
+function notamAlt(it) {
+  if (it.fromTxt || it.toTxt) return `${it.fromTxt || 'SFC'} ~ ${it.toTxt || ''}`.trim();
+  return `${it.lower ? it.lower * 100 + 'ft' : '지면'} ~ ${it.upper >= 999 ? '제한 없음' : it.upper * 100 + 'ft'}`;
+}
+function notamFeature(it) {
+  return { type: 'Feature', geometry: it.geometry, properties: {
+    번호: it.no, 기간: notamPeriod(it), 시간대: scheduleKST(it.schedule), 고도: notamAlt(it), 내용: it.text } };
+}
+async function loadNotams() {
+  for (const u of NOTAM_URLS) {
+    try {
+      const r = await fetch(u + (u.includes('?') ? '&' : '?') + 't=' + Date.now(), { cache: 'no-store' });
+      if (r.ok) { const d = await r.json(); if (d && Array.isArray(d.items)) { notamData = d; break; } }
+    } catch (e) {}
+  }
+  if (!notamData) return;
+  drawNotams();
+  updateNotamButton();
+  if (LS.get('notamHide', '') !== todayKST() && notamList().length) openNotamModal();
+}
+function drawNotams() {
+  if (!layerCtl) return;
+  if (!notamLayer) {
+    notamLayer = L.layerGroup();
+    overlayZone.set(notamLayer, NOTAM_ZONE);
+    layerCtl.addOverlay(notamLayer, `${swatch(NOTAM_ZONE)} 항공고시보(임시비행금지)`);
+    const saved = LS.get('layerOn', {});
+    if (saved.NOTAM === false) hiddenZones.add('NOTAM');
+    else { quietToggle = true; notamLayer.addTo(map); quietToggle = false; }
+  }
+  notamLayer.clearLayers();
+  for (const it of notamList()) {
+    if (!it.geometry) continue;
+    const on = notamStatus(it) === 'active';
+    L.geoJSON(it.geometry, { interactive: false, style: {
+      color: on ? '#c62828' : '#ef6c00', weight: 2, dashArray: on ? '5 4' : '2 6',
+      fillColor: on ? '#e53935' : '#ef6c00', fillOpacity: on ? 0.16 : 0.06 } }).addTo(notamLayer);
+  }
+}
+function updateNotamButton() {
+  const list = notamList(), btn = $('#btnNotam');
+  if (!btn) return;
+  btn.classList.toggle('hidden', !list.length);
+  const act = list.filter(it => notamStatus(it) === 'active').length;
+  $('#notamCount').textContent = list.length;
+  btn.classList.toggle('has-active', act > 0);
+}
+function refPoint() {
+  if (meMarker) { const p = meMarker.getLatLng(); return [p.lat, p.lng]; }
+  if (lastResult) return [lastResult.lat, lastResult.lon];
+  const c = map.getCenter(); return [c.lat, c.lng];
+}
+function openNotamModal() {
+  const list = notamList();
+  const [rl, ro] = refPoint();
+  const dist = it => it.geometry ? (containsPoint(it.geometry, ro, rl) ? 0 : distToBoundary(it.geometry, ro, rl)) : Infinity;
+  const rows = list.map(it => ({ it, st: notamStatus(it), d: dist(it) }))
+    .sort((a, b) => (a.st === 'active' ? 0 : 1) - (b.st === 'active' ? 0 : 1) || a.d - b.d);
+  const act = rows.filter(r => r.st === 'active').length;
+  const age = notamData.fetchedAtUTC ? (Date.now() - Date.parse(notamData.fetchedAtUTC)) / 3600e3 : 99;
+  $('#notamSummary').innerHTML = `전국 드론 관련 · 진행 중 <b>${act}</b>건 · 예정 <b>${rows.length - act}</b>건<br>`
+    + `<span class="muted">확인 시각 ${notamData.fetchedAt ? fmtKST(notamData.fetchedAtUTC) : '-'}${age > 8 ? ' · ⚠️ 최신이 아닐 수 있어요' : ''}</span>`;
+  $('#notamList').innerHTML = rows.map((r, i) => {
+    const it = r.it, badge = r.st === 'active' ? '<span class="tag" style="background:#c62828">진행 중</span>' : '<span class="tag" style="background:#ef6c00">예정</span>';
+    const where = !it.geometry ? '영역 정보 없음' : r.d === 0 ? '📍 현재 기준 위치가 이 구역 안' : `기준 위치에서 ${fmtDist(r.d)}`;
+    return `<div class="notam-item">
+      <div class="log-top"><b>${esc(it.no)} ${it.category === 'drone' ? '드론' : '임시제한'}</b>${badge}</div>
+      <div class="meta">🕘 ${esc(notamPeriod(it))}${it.schedule ? '<br>⏱ ' + esc(scheduleKST(it.schedule)) : ''}<br>↕ ${esc(notamAlt(it))} · ${esc(where)}</div>
+      <div class="notam-text">${esc(it.text)}</div>
+      ${it.geometry ? `<button class="btn sm" data-ni="${i}">🗺 지도에서 보기</button>` : ''}
+    </div>`;
+  }).join('') || '<p class="muted">현재 드론 관련 항공고시보가 없습니다.</p>';
+  $$('#notamList [data-ni]').forEach(b => b.addEventListener('click', () => {
+    const it = rows[+b.dataset.ni].it;
+    closeNotamModal();
+    switchTab('tab-map');
+    const z = it.radiusM ? (it.radiusM > 8000 ? 11 : it.radiusM > 3000 ? 12 : 13) : 12;
+    setViewVisible([it.center[0], it.center[1]], z);
+    checkAt(it.center[0], it.center[1], `${it.no} 항공고시보`);
+  }));
+  $('#notamHideToday').checked = false;
+  $('#notamModal').classList.remove('hidden');
+}
+function closeNotamModal() {
+  if ($('#notamHideToday').checked) LS.set('notamHide', todayKST());
+  $('#notamModal').classList.add('hidden');
+}
+$('#btnNotamClose').addEventListener('click', closeNotamModal);
+$('#notamModal').addEventListener('click', e => { if (e.target.id === 'notamModal') closeNotamModal(); });
+$('#btnNotam').addEventListener('click', () => { if (notamData) openNotamModal(); });
+const notamReady = loadNotams();
+
 /* ───────── 새로고침 시 이전 상태 복원 ───────── */
 (function restore() {
   const tab = LS.get('lastTab', 'tab-map');
@@ -915,5 +1046,5 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
 }
 
 // 테스트용 노출
-window.__dz = { containsPoint, distToBoundary, makeVerdict, ZONES, hiddenZones, overlayZone, drawZones };
+window.__dz = { containsPoint, distToBoundary, makeVerdict, ZONES, hiddenZones, overlayZone, drawZones, notamStatus, scheduleKST, get notamData() { return notamData; } };
 })();

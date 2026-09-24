@@ -183,3 +183,19 @@ a.btn{text-decoration:none;color:var(--primary)}
 .leaflet-control-layers label{display:flex;align-items:center;gap:2px;margin:3px 0}
 .leaflet-control-layers label .sw{margin:0 5px 0 2px}
 .legend li .sw{margin-top:0}
+
+/* 항공고시보 버튼·알림창 */
+.appbar-btn.notam{margin-left:auto;position:relative}
+.appbar-btn.notam:not(.hidden) ~ #btnRefresh{margin-left:6px}
+.appbar-btn.notam svg{width:22px;height:22px}
+.appbar-btn .cnt{position:absolute;top:-2px;right:-2px;min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:#ef6c00;color:#fff;font-size:11px;font-weight:800;line-height:17px;text-align:center}
+.appbar-btn.has-active .cnt{background:#e53935}
+.notam-box{display:flex;flex-direction:column}
+.notam-box #notamList{overflow-y:auto;flex:1;min-height:60px}
+.notam-item{border:1px solid var(--line);border-left:4px solid #ef6c00;border-radius:10px;padding:10px 12px;margin:8px 0;font-size:13px}
+.notam-item:has(.tag[style*="c62828"]){border-left-color:#c62828}
+.notam-item .meta{color:var(--muted);font-size:12px;margin:4px 0;line-height:1.5}
+.notam-text{white-space:pre-wrap;font-size:12px;background:var(--bg);border-radius:8px;padding:6px 8px;margin:6px 0;max-height:96px;overflow-y:auto;font-family:ui-monospace,monospace}
+.notam-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;border-top:1px solid var(--line);padding-top:10px;margin-top:6px}
+.hide-today{display:flex;align-items:center;gap:6px;font-size:14px}
+.hide-today input{width:18px;height:18px;margin:0}

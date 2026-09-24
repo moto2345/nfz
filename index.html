@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="하코 NFZ">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-  <link rel="stylesheet" href="style.css?v=23">
+  <link rel="stylesheet" href="style.css?v=24">
 </head>
 <body>
 
@@ -20,7 +20,11 @@
 <header class="appbar">
   <img src="icons/icon-192.png" alt="" class="appbar-logo">
   <h1>하코 NFZ 조회</h1>
-  <span class="badge">웹버전 v1.23</span>
+  <span class="badge">웹버전 v1.24</span>
+  <button id="btnNotam" class="appbar-btn notam hidden" type="button" aria-label="항공고시보" title="드론 관련 항공고시보">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M10 20.5a2.2 2.2 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    <span id="notamCount" class="cnt">0</span>
+  </button>
   <button id="btnRefresh" class="appbar-btn" type="button" aria-label="새로고침" title="새로고침">
     <svg class="ico-refresh" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     <svg class="ico-spin" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
@@ -114,7 +118,7 @@
     <b>지도의 구역 표시 (무늬)</b>
     <p class="muted small">지도에 그려지는 무늬는 드론 원스톱 지도와 같은 방식이에요. 지도 오른쪽 위 레이어 버튼에서 구역별로 켜고 끌 수 있고, 선택한 상태는 기억돼요.</p>
     <ul class="legend" id="mapLegend"></ul>
-    <p class="muted small">임시비행금지구역(행사·훈련)은 이 지도 데이터에 없을 수 있어요. 비행 전 드론 원스톱의 항공고시보를 꼭 확인하세요.</p>
+    <p class="muted small">🔔 <b>항공고시보(NOTAM)</b>: 행사·훈련 등으로 정해지는 임시 비행금지 구역이에요. 드론 관련 항공고시보를 30분마다 자동으로 가져와 빨간 점선 구역으로 표시하고 판정에도 반영해요. 맨 위 🔔 버튼으로 목록을 볼 수 있어요. 늦게 반영될 수 있으니 비행 전 드론 원스톱에서도 확인하세요.</p>
   </div>
 
   <div class="card">
@@ -185,6 +189,20 @@
 </nav>
 
 <!-- ═════════ 기록 입력 모달 ═════════ -->
+<!-- ═════════ 항공고시보 알림 ═════════ -->
+<div id="notamModal" class="modal hidden">
+  <div class="modal-box notam-box">
+    <h3>📢 드론 관련 항공고시보</h3>
+    <p class="small" id="notamSummary"></p>
+    <div id="notamList"></div>
+    <p class="muted small">항공고시보(NOTAM) 중 드론·초경량비행장치에 해당하는 것만 추렸어요. 참고용이니 비행 전 드론 원스톱에서 꼭 확인하세요.</p>
+    <div class="notam-foot">
+      <label class="hide-today"><input type="checkbox" id="notamHideToday"> 오늘 하루 보지 않기</label>
+      <button type="button" class="btn primary" id="btnNotamClose">닫기</button>
+    </div>
+  </div>
+</div>
+
 <div id="logModal" class="modal hidden">
   <form id="logForm" class="modal-box">
     <h3 id="logFormTitle">비행 기록</h3>
@@ -213,7 +231,7 @@
 <div id="toast" class="toast hidden"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="config.js?v=23"></script>
-<script src="app.js?v=23"></script>
+<script src="config.js?v=24"></script>
+<script src="app.js?v=24"></script>
 </body>
 </html>
