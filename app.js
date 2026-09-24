@@ -313,8 +313,21 @@ map.on('moveend', () => { const c = map.getCenter(); LS.set('mapView', { lat: c.
 const sheet = $('#sheet');
 function setSheetHeight() { document.documentElement.style.setProperty('--sheet-h', sheet.offsetHeight + 'px'); }
 new ResizeObserver(setSheetHeight).observe(sheet);
-$('#sheetHandle').addEventListener('click', () => sheet.classList.toggle('collapsed'));
-function sheetHtml(html) { $('#sheetBody').innerHTML = html; sheet.classList.remove('collapsed'); $('#sheetBody').scrollTop = 0; }
+// 결과 창 접기/펼치기: 버튼 누르기 또는 위·아래로 밀기
+function setCollapsed(on) {
+  sheet.classList.toggle('collapsed', on);
+  $('#sheetHandleText').textContent = on ? '펼치기' : '접기';
+  $('#sheetHandle').setAttribute('aria-label', on ? '결과 창 펼치기' : '결과 창 접기');
+}
+let handleY = null, handleSwiped = false;
+$('#sheetHandle').addEventListener('touchstart', e => { handleY = e.touches[0].clientY; handleSwiped = false; }, { passive: true });
+$('#sheetHandle').addEventListener('touchmove', e => {
+  if (handleY == null) return;
+  const dy = e.touches[0].clientY - handleY;
+  if (Math.abs(dy) > 25) { setCollapsed(dy > 0); handleSwiped = true; handleY = null; }
+}, { passive: true });
+$('#sheetHandle').addEventListener('click', () => { if (handleSwiped) { handleSwiped = false; return; } setCollapsed(!sheet.classList.contains('collapsed')); });
+function sheetHtml(html) { $('#sheetBody').innerHTML = html; setCollapsed(false); $('#sheetBody').scrollTop = 0; }
 
 /* ───────── 판정 실행 ───────── */
 let checkSeq = 0;

@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="하코 NFZ">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-  <link rel="stylesheet" href="style.css?v=13">
+  <link rel="stylesheet" href="style.css?v=14">
 </head>
 <body>
 
@@ -20,7 +20,7 @@
 <header class="appbar">
   <img src="icons/icon-192.png" alt="" class="appbar-logo">
   <h1>하코 NFZ 조회</h1>
-  <span class="badge">웹버전 v1.13</span>
+  <span class="badge">웹버전 v1.14</span>
   <button id="btnRefresh" class="appbar-btn" type="button" aria-label="새로고침" title="새로고침">
     <svg class="ico-refresh" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     <svg class="ico-spin" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
@@ -51,7 +51,10 @@
   </div>
 
   <div id="sheet" class="sheet">
-    <div class="sheet-handle" id="sheetHandle"></div>
+    <button type="button" class="sheet-handle" id="sheetHandle" aria-label="결과 창 접기">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span id="sheetHandleText">접기</span>
+    </button>
     <div id="sheetBody">
       <div class="hint">⌖ 버튼으로 내 위치를 확인하거나<br>지도를 눌러 원하는 지점의 비행 가능 여부를 확인하세요.</div>
     </div>
@@ -196,7 +199,7 @@
 <div id="toast" class="toast hidden"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="config.js?v=13"></script>
-<script src="app.js?v=13"></script>
+<script src="config.js?v=14"></script>
+<script src="app.js?v=14"></script>
 </body>
 </html>
