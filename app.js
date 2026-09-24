@@ -9,7 +9,8 @@ const LS = {
   get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 };
-const vkey = () => (LS.get('vworldKey', '') || CFG.VWORLD_KEY || '').trim();
+const vkey = () => (CFG.VWORLD_KEY || '').trim();
+try { localStorage.removeItem('vworldKey'); } catch (e) {}
 
 /* ───────── 공역 종류 ───────── */
 // level: 3=승인 없이 비행 불가, 2=승인 필요, 1=주의, 0=비행 가능 공역
@@ -320,7 +321,7 @@ let checkSeq = 0;
 async function checkAt(lat, lon, label) {
   const seq = ++checkSeq;
   if (!vkey()) {
-    sheetHtml(`<div class="verdict v-gray"><div class="ico">🔑</div><div><b>인증키가 필요합니다</b><small>[안내] 탭 → 설정에서 V-World 인증키를 입력하거나 config.js에 넣어주세요.</small></div></div>`);
+    sheetHtml(`<div class="verdict v-gray"><div class="ico">🔑</div><div><b>인증키가 필요합니다</b><small>config.js에 V-World 인증키를 넣어주세요.</small></div></div>`);
     return;
   }
   if (pinMarker) pinMarker.setLatLng([lat, lon]); else pinMarker = L.marker([lat, lon]).addTo(map);
@@ -699,19 +700,6 @@ function renderChecks() {
 }
 $('#btnCheckReset').addEventListener('click', () => { LS.set('checks', {}); renderChecks(); });
 renderChecks();
-
-/* ───────── 설정 ───────── */
-function renderKeyStatus() {
-  const own = LS.get('vworldKey', '');
-  $('#keyInput').value = own;
-  $('#keyStatus').textContent = own ? '이 기기에 저장된 인증키를 사용 중입니다.'
-    : CFG.VWORLD_KEY ? 'config.js에 설정된 인증키를 사용 중입니다.' : '인증키가 없습니다. 공역 판정·검색을 하려면 입력하세요.';
-}
-$('#btnKeySave').addEventListener('click', () => {
-  LS.set('vworldKey', $('#keyInput').value.trim());
-  renderKeyStatus(); buildLayers(); toast('저장했습니다.');
-});
-renderKeyStatus();
 
 /* ───────── 새로고침 시 이전 상태 복원 ───────── */
 (function restore() {
