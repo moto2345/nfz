@@ -158,7 +158,8 @@ function makeVerdict(inside, nearby, failed) {
   const has = id => inside.some(x => x.zone.id === id);
   const near = nearby[0];
   if (failed.length >= ZONES.filter(z => !z.optional).length) {
-    return { cls: 'v-gray', ico: '❔', title: '판정할 수 없음', desc: '공역 데이터를 불러오지 못했습니다. 인증키와 네트워크를 확인하세요.', code: 'error' };
+    const why = [...new Set(failed.map(f => f.error).filter(Boolean))].slice(0, 2).join(' / ');
+    return { cls: 'v-gray', ico: '❔', title: '판정할 수 없음', desc: '공역 데이터를 불러오지 못했습니다. 잠시 후 ⟳ 새로고침으로 다시 시도하세요.' + (why ? ` (원인: ${why})` : ''), code: 'error' };
   }
   if (top === 3) {
     const names = [...new Set(inside.filter(x => x.zone.level === 3).map(x => x.zone.name))].join(', ');
