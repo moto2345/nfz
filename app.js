@@ -159,7 +159,7 @@ function makeVerdict(inside, nearby, failed) {
   }
   const base = has('LT_C_AISUAC') ? '초경량비행장치 공역입니다.' : '확인된 비행금지·제한 공역이 없습니다.';
   const warn = near && near.dist < 1000 ? ` 단, ${fmtDist(near.dist)} 옆에 ${near.zone.name}이 있으니 넘어가지 않게 주의하세요.` : ' 기본 수칙(150m 미만·주간·가시권)을 지키면 비행할 수 있습니다.';
-  return { cls: 'v-green', ico: '✅', title: '비행 가능', desc: base + warn, code: 'ok' };
+  return { cls: 'v-green', ico: '✅', title: '비행 가능', desc: base + warn, code: 'ok', nearNote: near && near.dist < 1000 ? `${fmtDist(near.dist)} 옆에 ${near.zone.name}이 있습니다.` : '' };
 }
 
 /* ───────── 주소 ───────── */
@@ -216,16 +216,27 @@ async function fetchWeather(lat, lon) {
   return r.json();
 }
 function windDir(deg) { return ['북', '북동', '동', '남동', '남', '남서', '서', '북서'][Math.round(((deg % 360) / 45)) % 8] + '풍'; }
-function weatherHtml(w) {
+function weatherIssues(w) {
   const c = w.current, d = w.daily;
-  const sunrise = d.sunrise[0].slice(11, 16), sunset = d.sunset[0].slice(11, 16);
-  const nowHM = c.time.slice(11, 16);
-  const night = nowHM < sunrise || nowHM >= sunset;
+  const sunrise = d.sunrise[0].slice(11, 16), sunset = d.sunset[0].slice(11, 16), nowHM = c.time.slice(11, 16);
+  return {
+    sunrise, sunset, nowHM,
+    night: nowHM < sunrise || nowHM >= sunset,
+    windStrong: c.wind_gusts_10m >= 10 || c.wind_speed_10m >= 8,
+    windMid: !(c.wind_gusts_10m >= 10 || c.wind_speed_10m >= 8) && (c.wind_gusts_10m >= 7 || c.wind_speed_10m >= 5),
+    rain: c.precipitation > 0 || [51, 53, 55, 61, 63, 65, 66, 67, 71, 73, 75, 77, 80, 81, 82, 85, 86, 95, 96, 99].includes(c.weather_code),
+    fog: c.weather_code === 45 || c.weather_code === 48
+  };
+}
+function weatherHtml(w) {
+  const c = w.current;
+  const { sunrise, sunset, nowHM, night } = weatherIssues(w);
   const notes = [];
-  if (c.wind_gusts_10m >= 10 || c.wind_speed_10m >= 8) notes.push('💨 바람이 강해 소형 드론 비행은 추천하지 않습니다.');
-  else if (c.wind_gusts_10m >= 7 || c.wind_speed_10m >= 5) notes.push('💨 바람이 다소 강합니다. 높이 올라갈수록 더 세질 수 있어요.');
-  if (c.precipitation > 0 || [51, 53, 55, 61, 63, 65, 66, 67, 71, 73, 75, 77, 80, 81, 82, 85, 86, 95, 96, 99].includes(c.weather_code)) notes.push('🌧 강수가 있습니다. 방수 기체가 아니면 비행을 피하세요.');
-  if (c.weather_code === 45 || c.weather_code === 48) notes.push('🌫 안개로 가시권 확보가 어렵습니다.');
+  const iss = weatherIssues(w);
+  if (iss.windStrong) notes.push('💨 바람이 강해 소형 드론 비행은 추천하지 않습니다.');
+  else if (iss.windMid) notes.push('💨 바람이 다소 강합니다. 높이 올라갈수록 더 세질 수 있어요.');
+  if (iss.rain) notes.push('🌧 강수가 있습니다. 방수 기체가 아니면 비행을 피하세요.');
+  if (iss.fog) notes.push('🌫 안개로 가시권 확보가 어렵습니다.');
   if (night) notes.push(`🌙 지금은 야간(일몰 ${sunset} 이후~일출 ${sunrise} 전)이라 특별비행승인 없이는 비행할 수 없습니다.`);
   if (!notes.length) notes.push('👍 비행하기 괜찮은 날씨입니다.');
   return `<div class="section-title">현재 날씨 (${nowHM} 기준)</div>
@@ -305,7 +316,35 @@ async function checkAt(lat, lon, label) {
   fetchWeather(lat, lon).then(w => {
     if (seq !== checkSeq) return;
     const box = $('#wxBox'); if (box) box.innerHTML = weatherHtml(w);
+    applyWeatherToVerdict(res, weatherIssues(w));
   }).catch(() => { const box = $('#wxBox'); if (box) box.innerHTML = '<p class="muted small">날씨 정보를 불러오지 못했습니다.</p>'; });
+}
+
+// 공역 판정 + 현재 조건(야간·바람·비·안개)을 합쳐 맨 위 판정을 갱신
+function applyWeatherToVerdict(r, iss) {
+  const probs = [];
+  if (iss.night) probs.push(`야간(일몰 ${iss.sunset}~일출 ${iss.sunrise})`);
+  if (iss.windStrong) probs.push('강풍');
+  if (iss.rain) probs.push('비·눈');
+  if (iss.fog) probs.push('안개');
+  if (!probs.length) return;
+  const v = r.verdict, el = $('#sheetBody .verdict');
+  if (!el) return;
+  if (v.code === 'ok' || v.code === 'caution') {
+    const what = probs.join(', ');
+    const reason = iss.night ? '야간 비행은 특별비행승인 없이 할 수 없습니다.' : '지금은 안전한 비행이 어렵습니다.';
+    r.verdict = Object.assign({}, v, {
+      cls: 'v-yellow', ico: iss.night ? '🌙' : '🌬️',
+      title: `공역은 ${v.code === 'ok' ? '비행 가능' : '주의'} · 지금은 ${iss.night ? '야간' : '비행 부적합'}`,
+      desc: `${what} — ${reason} ${iss.night ? `일출(${iss.sunrise}) 이후 비행하세요.` : '날씨가 좋아진 뒤 비행하세요.'}${v.nearNote ? ' 참고로 ' + v.nearNote : ''}`,
+      code: v.code, now: 'bad'
+    });
+  } else {
+    r.verdict = Object.assign({}, v, { desc: v.desc + ` 또한 지금은 ${probs.join(', ')}입니다.` });
+  }
+  const nv = r.verdict;
+  el.className = 'verdict ' + nv.cls;
+  el.innerHTML = `<div class="ico">${nv.ico}</div><div><b>${esc(nv.title)}</b><small>${esc(nv.desc)}</small></div>`;
 }
 
 function zoneRow(x, showDist) {
