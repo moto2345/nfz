@@ -332,7 +332,25 @@ map.on('moveend', () => { const c = map.getCenter(); LS.set('mapView', { lat: c.
 
 /* ───────── 하단 시트 ───────── */
 const sheet = $('#sheet');
-function setSheetHeight() { document.documentElement.style.setProperty('--sheet-h', sheet.offsetHeight + 'px'); }
+// 결과 창 높이가 바뀌면(접기·펼치기·내용 변경) 보이는 지도 영역의 가운데가 그대로 유지되도록 지도를 같이 움직임
+let lastSheetH = 0;
+function setSheetHeight() {
+  const h = sheet.offsetHeight;
+  if (!h) return; // 다른 탭을 보는 중
+  document.documentElement.style.setProperty('--sheet-h', h + 'px');
+  if (lastSheetH && h !== lastSheetH) map.panBy([0, Math.round((h - lastSheetH) / 2)], { animate: true, duration: 0.25 });
+  lastSheetH = h;
+}
+// 검색창 아래 ~ 결과 창 위, 실제로 보이는 지도 영역의 가운데에 지점이 오도록 이동
+function setViewVisible(latlng, zoom) {
+  const H = map.getSize().y;
+  const sb = $('.searchbar');
+  const top = sb.offsetTop + $('#searchForm').offsetHeight;
+  const bottom = H - (sheet.offsetHeight || 0);
+  const offset = bottom > top ? H / 2 - (top + bottom) / 2 : 0;
+  const p = map.project(latlng, zoom).add([0, offset]);
+  map.setView(map.unproject(p, zoom), zoom);
+}
 new ResizeObserver(setSheetHeight).observe(sheet);
 // 결과 창 접기/펼치기: 버튼 누르기 또는 위·아래로 밀기
 function setCollapsed(on) {
@@ -487,8 +505,7 @@ function locateMe(opt = {}) {
     fab.classList.remove('locating'); fab.classList.add('found');
     const { latitude: lat, longitude: lon, accuracy } = p.coords;
     showMe(lat, lon, accuracy);
-    if (!opt.keepView) map.setView([lat, lon], Math.max(map.getZoom(), 14));
-    else map.panTo([lat, lon]);
+    setViewVisible([lat, lon], opt.keepView ? map.getZoom() : Math.max(map.getZoom(), 14));
     checkAt(lat, lon, '내 위치');
   }, err => {
     fab.classList.remove('locating', 'found');
@@ -548,7 +565,7 @@ function addFavorite(r) {
 }
 function goTo(lat, lon, name) {
   resultsBox.classList.add('hidden'); $('#searchInput').blur();
-  map.setView([lat, lon], Math.max(map.getZoom(), 14));
+  setViewVisible([lat, lon], Math.max(map.getZoom(), 14));
   checkAt(lat, lon, name);
 }
 $('#searchInput').addEventListener('focus', () => { $('#searchInput').placeholder = '주소·장소 검색'; if (!$('#searchInput').value.trim()) showFavorites(); });
