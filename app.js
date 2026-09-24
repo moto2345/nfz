@@ -472,6 +472,7 @@ async function copyPoint(r) {
     `해당 공역: ${zones}`,
     `판정: ${r.verdict.title}`
   ].filter(Boolean).join('\n');
+  if (window.NFZApp && window.NFZApp.share) { try { window.NFZApp.share(text); return; } catch (e) {} }
   try {
     if (navigator.share && /Android|iPhone|iPad/i.test(navigator.userAgent)) { await navigator.share({ title: '비행 지점', text }); return; }
     await navigator.clipboard.writeText(text); toast('복사했습니다. 비행승인 신청서에 붙여넣으세요.');
@@ -710,7 +711,10 @@ function renderLogs() {
   });
 }
 
+// 안드로이드 앱 안에서 실행 중이면 앱 기능(NFZApp)으로 저장·공유
+const inApp = !!(window.NFZApp && window.NFZApp.saveFile);
 function download(name, text, type) {
+  if (inApp) { try { window.NFZApp.saveFile(name, text, type.split(';')[0]); return; } catch (e) {} }
   const blob = new Blob([text], { type });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
   document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
@@ -801,6 +805,13 @@ renderChecks();
     else checkAt(lp.lat, lp.lon, lp.label);
   }
 })();
+
+/* ───────── 앱에서 실행 중이면 배지를 '앱버전'으로 ───────── */
+if (window.NFZApp) {
+  const bd = $('.appbar .badge');
+  if (bd) bd.textContent = bd.textContent.replace('웹버전', '앱버전');
+  const dl = $('#androidApp'); if (dl) dl.classList.add('hidden');
+}
 
 /* ───────── PWA ───────── */
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
