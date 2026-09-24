@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>드론 비행구역 확인</title>
+  <meta name="description" content="취미 드론(초경량비행장치) 비행 전 비행금지·제한구역, 관제권, 날씨를 확인하고 비행 기록을 남기는 웹앱">
+  <meta name="theme-color" content="#1565c0">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="드론구역">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ═════════ 지도 탭 ═════════ -->
+<section id="tab-map" class="tab active">
+  <div id="map"></div>
+
+  <div class="searchbar">
+    <form id="searchForm" autocomplete="off">
+      <input id="searchInput" type="search" placeholder="주소·장소 검색 (예: 여의도 한강공원)">
+      <button type="submit" aria-label="검색">🔍</button>
+    </form>
+    <div id="searchResults" class="dropdown hidden"></div>
+  </div>
+
+  <div class="fab-col">
+    <button id="btnLocate" class="fab" title="내 위치 확인">📍</button>
+  </div>
+
+  <div id="timerBanner" class="timer-banner hidden">
+    <span>✈️ 비행 중 <b id="timerText">00:00</b></span>
+    <button id="btnTimerStop">비행 종료</button>
+  </div>
+
+  <div id="sheet" class="sheet">
+    <div class="sheet-handle" id="sheetHandle"></div>
+    <div id="sheetBody">
+      <div class="hint">📍 버튼으로 내 위치를 확인하거나<br>지도를 눌러 원하는 지점의 비행 가능 여부를 확인하세요.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════ 비행기록 탭 ═════════ -->
+<section id="tab-log" class="tab page">
+  <h2>비행 기록</h2>
+  <div class="stats" id="logStats"></div>
+  <div class="row-btns">
+    <button id="btnNewLog" class="btn primary">+ 기록 추가</button>
+    <button id="btnTimerStart" class="btn">⏱ 비행 타이머</button>
+  </div>
+  <div id="logList"></div>
+  <details class="card">
+    <summary>백업 · 내보내기</summary>
+    <div class="row-btns">
+      <button id="btnCsv" class="btn">엑셀(CSV) 내보내기</button>
+      <button id="btnBackup" class="btn">백업 파일 저장</button>
+      <label class="btn">백업 불러오기<input id="fileRestore" type="file" accept=".json,application/json" hidden></label>
+    </div>
+    <p class="muted small">기록은 이 기기의 브라우저에만 저장됩니다. 기기를 바꾸거나 브라우저 데이터를 지우기 전에 백업해 두세요.</p>
+  </details>
+</section>
+
+<!-- ═════════ 점검 탭 ═════════ -->
+<section id="tab-check" class="tab page">
+  <h2>비행 전 점검</h2>
+  <div class="progress"><div id="checkBar"></div></div>
+  <p id="checkCount" class="muted"></p>
+  <div id="checkList"></div>
+  <button id="btnCheckReset" class="btn">모두 해제</button>
+</section>
+
+<!-- ═════════ 안내 탭 ═════════ -->
+<section id="tab-info" class="tab page">
+  <h2>안내</h2>
+
+  <div class="card warn">
+    <b>⚠️ 참고용 정보입니다</b>
+    <p>공역 정보는 국토교통부 공간정보(V-World) 데이터를 기준으로 하며, 임시 비행금지(행사·훈련 등)나 최신 변경 사항이 늦게 반영될 수 있습니다. 실제 비행 전에는 반드시 <a href="https://drone.onestop.go.kr" target="_blank" rel="noopener">드론 원스톱 민원서비스</a>에서 확인하고, 필요한 비행승인·촬영허가를 받으세요.</p>
+  </div>
+
+  <div class="card">
+    <b>판정 색상</b>
+    <ul class="legend">
+      <li><i style="background:#e53935"></i>비행금지구역 · 관제권 — 승인 없이 비행 불가</li>
+      <li><i style="background:#fb8c00"></i>비행제한구역 · 위험구역 — 승인 필요</li>
+      <li><i style="background:#fdd835"></i>군작전구역 — 비행 전 확인 권장</li>
+      <li><i style="background:#43a047"></i>초경량비행장치 공역 · 일반 공역 — 기본 수칙 지키면 비행 가능</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <b>취미 비행 기본 수칙</b>
+    <ul>
+      <li>고도 150m 미만, 눈으로 보이는 범위(가시권) 안에서만 비행</li>
+      <li>일몰 후~일출 전 야간 비행 금지 (특별비행승인 시 예외)</li>
+      <li>사람이 많이 모인 곳(행사장, 경기장 등) 상공 비행 금지</li>
+      <li>음주 상태 비행 금지, 비행 중 물건 투하 금지</li>
+      <li>공항 주변 관제권, 휴전선 인근, 서울 도심 등은 승인 필요</li>
+      <li>사진·영상 촬영은 비행승인과 별도로 항공촬영 허가가 필요할 수 있음</li>
+      <li>기체 무게에 따라 조종자 증명·기체 신고 대상이 달라지니 드론 원스톱에서 확인</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <b>설정</b>
+    <label class="field">V-World 인증키
+      <input id="keyInput" type="text" placeholder="config.js에 넣었다면 비워두세요">
+    </label>
+    <div class="row-btns">
+      <button id="btnKeySave" class="btn primary">저장</button>
+    </div>
+    <p id="keyStatus" class="muted small"></p>
+  </div>
+
+  <div class="card">
+    <b>유용한 링크</b>
+    <ul>
+      <li><a href="https://drone.onestop.go.kr" target="_blank" rel="noopener">드론 원스톱 민원서비스 (비행승인·촬영허가)</a></li>
+      <li><a href="https://www.vworld.kr" target="_blank" rel="noopener">브이월드 (공간정보 오픈플랫폼)</a></li>
+    </ul>
+    <p class="muted small">날씨: Open-Meteo · 지도·공역·주소: V-World</p>
+  </div>
+</section>
+
+<!-- ═════════ 하단 탭바 ═════════ -->
+<nav class="tabbar">
+  <button data-tab="tab-map" class="active"><span>🗺️</span>지도</button>
+  <button data-tab="tab-log"><span>📒</span>기록</button>
+  <button data-tab="tab-check"><span>✅</span>점검</button>
+  <button data-tab="tab-info"><span>ℹ️</span>안내</button>
+</nav>
+
+<!-- ═════════ 기록 입력 모달 ═════════ -->
+<div id="logModal" class="modal hidden">
+  <form id="logForm" class="modal-box">
+    <h3 id="logFormTitle">비행 기록</h3>
+    <input type="hidden" name="rid">
+    <input type="hidden" name="lat">
+    <input type="hidden" name="lng">
+    <input type="hidden" name="verdict">
+    <label class="field">일시<input type="datetime-local" name="date" required></label>
+    <label class="field">장소<input type="text" name="place" placeholder="예: 반포 한강공원"></label>
+    <p class="muted small" id="logCoord"></p>
+    <label class="field">기체<input type="text" name="drone" list="droneList" placeholder="예: DJI Mini 4 Pro"></label>
+    <datalist id="droneList"></datalist>
+    <div class="grid2">
+      <label class="field">비행시간(분)<input type="number" name="minutes" min="0" step="1"></label>
+      <label class="field">최대고도(m)<input type="number" name="alt" min="0" step="1"></label>
+    </div>
+    <label class="field">배터리 사용(개)<input type="number" name="batteries" min="0" step="1"></label>
+    <label class="field">메모<textarea name="memo" rows="3" placeholder="날씨, 촬영 내용, 특이사항 등"></textarea></label>
+    <div class="row-btns end">
+      <button type="button" class="btn" id="btnLogCancel">취소</button>
+      <button type="submit" class="btn primary">저장</button>
+    </div>
+  </form>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
