@@ -54,7 +54,21 @@ function toast(msg, ms = 2600) {
 
 // V-World는 CORS를 허용하지 않아 JSONP(callback)로 호출
 let jsonpSeq = 0;
-function jsonp(url, params, timeout = 15000) {
+// 브이월드에 한꺼번에 너무 많이 요청하면 일부가 실패하므로 4개씩 나눠서 보내고, 실패하면 한 번 더 시도
+const JSONP_MAX = 4; let jsonpActive = 0; const jsonpQueue = [];
+function jsonp(url, params, timeout = 15000, retries = 1) {
+  return new Promise((resolve, reject) => {
+    const run = () => {
+      jsonpActive++;
+      jsonpRaw(url, params, timeout).then(resolve, err => {
+        if (retries > 0) setTimeout(() => jsonp(url, params, timeout, retries - 1).then(resolve, reject), 500);
+        else reject(err);
+      }).finally(() => { jsonpActive--; const next = jsonpQueue.shift(); if (next) next(); });
+    };
+    if (jsonpActive < JSONP_MAX) run(); else jsonpQueue.push(run);
+  });
+}
+function jsonpRaw(url, params, timeout) {
   return new Promise((resolve, reject) => {
     const cb = '__vw' + (++jsonpSeq) + '_' + Date.now();
     const s = document.createElement('script');
@@ -123,6 +137,14 @@ function propsTable(props) {
 
 /* ───────── 공역 판정 ───────── */
 async function queryLayer(zone, bbox) {
+  try { return await queryLayerOnce(zone, bbox); }
+  catch (e) {
+    if (zone.optional) throw e;
+    await new Promise(r => setTimeout(r, 800));
+    return queryLayerOnce(zone, bbox); // 필수 공역은 한 번 더
+  }
+}
+async function queryLayerOnce(zone, bbox) {
   const res = await jsonp('https://api.vworld.kr/req/data', Object.assign(vwBase(), {
     service: 'data', request: 'GetFeature', version: '2.0', data: zone.id,
     size: '1000', page: '1', geometry: 'true', attribute: 'true', crs: 'EPSG:4326',
@@ -172,6 +194,11 @@ function makeVerdict(inside, nearby, failed) {
   if (top === 2) {
     const names = [...new Set(inside.filter(x => x.zone.level === 2).map(x => x.zone.name))].join(', ');
     return { cls: 'v-orange', ico: '⚠️', title: '비행승인 필요', desc: `${names} 안입니다. 드론 원스톱에서 비행승인을 받아야 합니다. (승인 없이 비행 시 과태료 150만원, 1차 위반 기준)`, code: 'approval' };
+  }
+  const critical = failed.filter(f => f.zone.level >= 1); // 금지·제한·주의 구역 데이터가 빠졌을 때만 판정 보류
+  if (critical.length && top < 2) {
+    const names = critical.map(f => f.zone.name).join(', ');
+    return { cls: 'v-gray', ico: '⚠️', title: '확인 불완전 — 다시 확인 필요', desc: `${names} 데이터를 불러오지 못해 비행 가능 여부를 확정할 수 없습니다. 잠시 후 ⟳ 새로고침으로 다시 확인하세요.`, code: 'partial' };
   }
   if (top === 1) {
     const names = [...new Set(inside.filter(x => x.zone.level === 1).map(x => x.zone.name))].join(', ');
@@ -317,14 +344,33 @@ function buildLayers() {
   layerCtl = L.control.layers(baseLayers, {}, { position: 'topright', collapsed: true }).addTo(map);
   if (key) for (const z of ZONES) if (!z.optional || verified.has(z.id)) addZoneOverlay(z);
 }
+// 지도 무늬 칸(타일)을 못 받아오면 잠시 뒤 최대 3번 다시 요청 → 빈 네모 칸 방지
+function retryTiles(layer, max = 3) {
+  layer.on('tileerror', e => {
+    const img = e.tile;
+    if (!img || !img.src || img.src.startsWith('data:')) return;
+    const n = (img._retry || 0) + 1;
+    if (n > max) return;
+    img._retry = n;
+    setTimeout(() => {
+      if (!img.isConnected || !img.src || img.src.startsWith('data:')) return; // 이미 화면에서 빠진 칸
+      const base = img.src.replace(/[?&]_r=\d+$/, '');
+      img.src = base + (base.includes('?') ? '&' : '?') + '_r=' + n;
+    }, 500 * n + Math.random() * 400);
+  });
+}
 function addZoneOverlay(z) {
   const key = vkey(); if (!key || !layerCtl) return;
   const label = `${swatch(z)} ${z.name}`;
   if (overlayLayers[label]) return;
   const wms = L.tileLayer.wms('https://api.vworld.kr/req/wms', {
     layers: z.id.toLowerCase(), styles: z.id.toLowerCase(), format: 'image/png', transparent: true,
-    version: '1.3.0', key, domain: location.origin, opacity: z.level === 0 ? 0.45 : 0.55, maxZoom: 19
+    version: '1.3.0', key, domain: location.origin, opacity: z.level === 0 ? 0.45 : 0.55, maxZoom: 19,
+    tileSize: 512,            // 큰 칸으로 받아 요청 수를 1/4로 줄임
+    updateWhenZooming: false, // 확대·축소 중간 단계는 받지 않음
+    keepBuffer: 1
   });
+  retryTiles(wms);
   overlayLayers[label] = wms;
   overlayZone.set(wms, z);
   layerCtl.addOverlay(wms, label);
