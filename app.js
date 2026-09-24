@@ -458,22 +458,42 @@ $('#btnLocate').addEventListener('click', () => locateMe());
 
 /* ───────── 검색 & 즐겨찾기 ───────── */
 const resultsBox = $('#searchResults');
+// 검색창을 누르면: 최근 검색 + 저장한 장소
 function showFavorites() {
-  const favs = LS.get('favorites', []);
-  if (!favs.length) { resultsBox.classList.add('hidden'); return; }
-  resultsBox.innerHTML = '<div class="head">★ 저장한 장소</div>' + favs.map((f, i) =>
-    `<div class="item" data-fav="${i}"><b>${esc(f.name)}</b><span>${f.lat.toFixed(4)}, ${f.lon.toFixed(4)} · 길게 눌러 삭제</span></div>`).join('');
+  const recent = LS.get('recentSearches', []), favs = LS.get('favorites', []);
+  if (!recent.length && !favs.length) { resultsBox.innerHTML = '<div class="item"><span>최근 검색 기록이 없습니다.</span></div>'; resultsBox.classList.remove('hidden'); return; }
+  let h = '';
+  if (recent.length) {
+    h += '<div class="head">🕘 최근 검색<button type="button" class="head-btn" data-clear="1">전체 삭제</button></div>';
+    h += recent.map((x, i) => `<div class="item row" data-rec="${i}"><div class="grow"><b>${esc(x.title)}</b><span>${esc(x.sub || '')}</span></div><button type="button" class="x" data-delrec="${i}" aria-label="삭제">✕</button></div>`).join('');
+  }
+  if (favs.length) {
+    h += '<div class="head">★ 저장한 장소</div>';
+    h += favs.map((f, i) => `<div class="item row" data-fav="${i}"><div class="grow"><b>${esc(f.name)}</b><span>${f.lat.toFixed(4)}, ${f.lon.toFixed(4)}</span></div><button type="button" class="x" data-delfav="${i}" aria-label="삭제">✕</button></div>`).join('');
+  }
+  resultsBox.innerHTML = h;
   resultsBox.classList.remove('hidden');
-  $$('.item', resultsBox).forEach(el => {
-    const f = favs[+el.dataset.fav];
-    let pressT;
-    el.addEventListener('click', () => { goTo(f.lat, f.lon, f.name); });
-    const del = () => { if (confirm(`'${f.name}'을(를) 삭제할까요?`)) { favs.splice(+el.dataset.fav, 1); LS.set('favorites', favs); showFavorites(); } };
-    el.addEventListener('contextmenu', e => { e.preventDefault(); del(); });
-    el.addEventListener('touchstart', () => { pressT = setTimeout(del, 700); }, { passive: true });
-    el.addEventListener('touchend', () => clearTimeout(pressT));
-    el.addEventListener('touchmove', () => clearTimeout(pressT), { passive: true });
-  });
+  resultsBox.querySelectorAll('[data-rec]').forEach(el => el.addEventListener('click', e => {
+    if (e.target.closest('.x')) return; const x = recent[+el.dataset.rec]; addRecent(x); goTo(x.lat, x.lon, x.title);
+  }));
+  resultsBox.querySelectorAll('[data-fav]').forEach(el => el.addEventListener('click', e => {
+    if (e.target.closest('.x')) return; const f = favs[+el.dataset.fav]; goTo(f.lat, f.lon, f.name);
+  }));
+  resultsBox.querySelectorAll('[data-delrec]').forEach(el => el.addEventListener('click', e => {
+    e.stopPropagation(); recent.splice(+el.dataset.delrec, 1); LS.set('recentSearches', recent); showFavorites();
+  }));
+  resultsBox.querySelectorAll('[data-delfav]').forEach(el => el.addEventListener('click', e => {
+    e.stopPropagation(); const f = favs[+el.dataset.delfav];
+    if (confirm(`저장한 장소 '${f.name}'을(를) 삭제할까요?`)) { favs.splice(+el.dataset.delfav, 1); LS.set('favorites', favs); }
+    showFavorites();
+  }));
+  const clr = resultsBox.querySelector('[data-clear]');
+  if (clr) clr.addEventListener('click', e => { e.stopPropagation(); LS.set('recentSearches', []); showFavorites(); });
+}
+function addRecent(x) {
+  const list = LS.get('recentSearches', []).filter(r => !(r.title === x.title && Math.abs(r.lat - x.lat) < 1e-5 && Math.abs(r.lon - x.lon) < 1e-5));
+  list.unshift({ title: x.title, sub: x.sub || '', lat: x.lat, lon: x.lon });
+  LS.set('recentSearches', list.slice(0, 15));
 }
 function addFavorite(r) {
   const def = r.label && r.label !== '내 위치' ? r.label : (r.addr && (r.addr.road || r.addr.parcel)) || '저장한 장소';
@@ -502,7 +522,13 @@ $('#searchForm').addEventListener('submit', async e => {
   const list = await searchPlaces(q);
   if (!list.length) { resultsBox.innerHTML = '<div class="item"><span>검색 결과가 없습니다.</span></div>'; return; }
   resultsBox.innerHTML = list.map((x, i) => `<div class="item" data-i="${i}"><b>${esc(x.title)}</b><span>${esc(x.sub)}</span></div>`).join('');
-  $$('.item', resultsBox).forEach(el => el.addEventListener('click', () => { const x = list[+el.dataset.i]; goTo(x.lat, x.lon, x.title); }));
+  $$('.item', resultsBox).forEach(el => el.addEventListener('click', () => { const x = list[+el.dataset.i]; addRecent(x); goTo(x.lat, x.lon, x.title); }));
+});
+
+/* ───────── 새로고침 버튼 ───────── */
+$('#btnRefresh').addEventListener('click', () => {
+  $('#btnRefresh').classList.add('spin');
+  setTimeout(() => location.reload(), 150); // 이전 화면·지점은 복원 기능으로 다시 판정됨
 });
 
 /* ───────── 탭 ───────── */
