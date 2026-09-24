@@ -173,3 +173,5 @@ a.btn{text-decoration:none;color:var(--primary)}
 
 /* 아이폰은 입력창 글씨가 16px보다 작으면 자동 확대되므로 아이폰에서만 16px */
 @supports (-webkit-touch-callout:none){ input,textarea,select{font-size:16px!important} }
+
+.searchbar input::placeholder{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

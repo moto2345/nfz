@@ -179,6 +179,27 @@ function makeVerdict(inside, nearby, failed) {
 }
 
 /* ───────── 주소 ───────── */
+// 시·도 이름 줄이기 (서울특별시 → 서울, 충청북도 → 충북 …)
+const SIDO_SHORT = [
+  ['서울특별시', '서울'], ['부산광역시', '부산'], ['대구광역시', '대구'], ['인천광역시', '인천'], ['광주광역시', '광주'],
+  ['대전광역시', '대전'], ['울산광역시', '울산'], ['세종특별자치시', '세종'], ['경기도', '경기'],
+  ['강원특별자치도', '강원'], ['강원도', '강원'], ['충청북도', '충북'], ['충청남도', '충남'],
+  ['전북특별자치도', '전북'], ['전라북도', '전북'], ['전라남도', '전남'], ['경상북도', '경북'], ['경상남도', '경남'],
+  ['제주특별자치도', '제주']
+];
+function shortAddr(a) {
+  if (!a) return '';
+  for (const [full, short] of SIDO_SHORT) if (a.startsWith(full)) return short + a.slice(full.length);
+  return a;
+}
+const SEARCH_PH = '주소·장소 검색 (예: 여의도 한강공원)';
+let myAddrText = '';
+function setMyAddress(addr) {
+  const a = addr && (addr.road || addr.parcel);
+  myAddrText = a ? '내 위치: ' + shortAddr(a) : '';
+  const inp = $('#searchInput');
+  if (document.activeElement !== inp) inp.placeholder = myAddrText || SEARCH_PH;
+}
 async function reverseGeocode(lat, lon) {
   try {
     const res = await jsonp('https://api.vworld.kr/req/address', Object.assign(vwBase(), {
@@ -345,6 +366,7 @@ async function checkAt(lat, lon, label) {
   const [res, addr] = await Promise.all([analyze(lat, lon), reverseGeocode(lat, lon)]);
   if (seq !== checkSeq) return;
   res.addr = addr; res.label = label || '';
+  if (label === '내 위치') setMyAddress(addr);
   LS.set('lastPoint', { lat, lon, label: label || '' });
   lastResult = res;
   renderResult(res);
@@ -394,9 +416,10 @@ function zoneRow(x, showDist) {
 function renderResult(r) {
   const v = r.verdict;
   const addrLine = r.label || (r.addr && (r.addr.road || r.addr.parcel)) || '선택한 지점';
-  const sub = r.addr && r.addr.road && r.addr.parcel ? r.addr.parcel : '';
+  const isMe = r.label === '내 위치';
+  const sub = !isMe && r.addr && r.addr.road && r.addr.parcel ? r.addr.parcel : '';
   let h = `<div class="verdict ${v.cls}"><div class="ico">${v.ico}</div><div><b>${v.title}</b><small>${esc(v.desc)}</small></div></div>
-    <p class="addr"><b>${esc(addrLine)}</b><br><span class="muted">${esc(sub)} ${r.lat.toFixed(5)}, ${r.lon.toFixed(5)}</span></p>
+    <p class="addr"><b>${esc(addrLine)}</b><br><span class="muted">${isMe ? '위도 ' + r.lat.toFixed(5) + ' · 경도 ' + r.lon.toFixed(5) : esc(sub) + ' ' + r.lat.toFixed(5) + ', ' + r.lon.toFixed(5)}</span></p>
     <div class="row-btns">
       <button class="btn sm" id="btnFav">☆ 장소 저장</button>
       <button class="btn sm" id="btnLogHere">📒 기록 추가</button>
@@ -526,7 +549,8 @@ function goTo(lat, lon, name) {
   map.setView([lat, lon], Math.max(map.getZoom(), 14));
   checkAt(lat, lon, name);
 }
-$('#searchInput').addEventListener('focus', () => { if (!$('#searchInput').value.trim()) showFavorites(); });
+$('#searchInput').addEventListener('focus', () => { $('#searchInput').placeholder = '주소·장소 검색'; if (!$('#searchInput').value.trim()) showFavorites(); });
+$('#searchInput').addEventListener('blur', () => { $('#searchInput').placeholder = myAddrText || SEARCH_PH; });
 $('#searchInput').addEventListener('input', () => { if (!$('#searchInput').value.trim()) showFavorites(); });
 document.addEventListener('click', e => { if (!e.target.closest('.searchbar')) resultsBox.classList.add('hidden'); });
 $('#searchForm').addEventListener('submit', async e => {
