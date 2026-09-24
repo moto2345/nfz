@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="하코 NFZ">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-  <link rel="stylesheet" href="style.css?v=21">
+  <link rel="stylesheet" href="style.css?v=22">
 </head>
 <body>
 
@@ -20,7 +20,7 @@
 <header class="appbar">
   <img src="icons/icon-192.png" alt="" class="appbar-logo">
   <h1>하코 NFZ 조회</h1>
-  <span class="badge">웹버전 v1.21</span>
+  <span class="badge">웹버전 v1.22</span>
   <button id="btnRefresh" class="appbar-btn" type="button" aria-label="새로고침" title="새로고침">
     <svg class="ico-refresh" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     <svg class="ico-spin" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
@@ -100,14 +100,21 @@
   </div>
 
   <div class="card">
-    <b>판정 색상</b>
+    <b>판정 결과 색 (결과 창 맨 위)</b>
     <ul class="legend">
-      <li><i style="background:#e53935"></i>비행금지구역 · 관제권 · 임시비행금지구역 — 승인 없이 비행 불가</li>
-      <li><i style="background:#fb8c00"></i>비행제한구역 · 위험구역 · 비행장교통구역 — 비행승인 필요</li>
-      <li><i style="background:#fdd835"></i>군작전구역 · 경계구역 · 국립공원 — 비행 전 확인 권장</li>
-      <li><i style="background:#43a047"></i>초경량비행장치 공역 · 일반 공역 — 비행승인 불필요 (조종자 준수사항 준수)</li>
+      <li><i style="background:#e53935"></i>⛔ 비행금지구역 · 관제권 안 — 승인 없이 비행 불가</li>
+      <li><i style="background:#fb8c00"></i>⚠️ 비행제한구역 · 위험구역 · 비행장교통구역 안 — 비행승인 필요</li>
+      <li><i style="background:#fdd835"></i>🟡 군작전구역 · 경계구역 · 국립공원 안 — 비행 전 확인 권장</li>
+      <li><i style="background:#43a047"></i>✅ 초경량비행장치 공역 · 일반 공역 — 비행승인 불필요 (조종자 준수사항 준수)</li>
       <li><i style="background:#fdd835"></i>🌙 노란색이 날씨·야간 때문이면 "공역은 가능 · 지금은 야간"처럼 표시</li>
     </ul>
+  </div>
+
+  <div class="card">
+    <b>지도의 구역 표시 (무늬)</b>
+    <p class="muted small">지도에 그려지는 무늬는 드론 원스톱 지도와 같은 방식이에요. 지도 오른쪽 위 레이어 버튼에서 구역별로 켜고 끌 수 있고, 선택한 상태는 기억돼요.</p>
+    <ul class="legend" id="mapLegend"></ul>
+    <p class="muted small">임시비행금지구역(행사·훈련)은 이 지도 데이터에 없을 수 있어요. 비행 전 드론 원스톱의 항공고시보를 꼭 확인하세요.</p>
   </div>
 
   <div class="card">
@@ -206,7 +213,7 @@
 <div id="toast" class="toast hidden"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="config.js?v=21"></script>
-<script src="app.js?v=21"></script>
+<script src="config.js?v=22"></script>
+<script src="app.js?v=22"></script>
 </body>
 </html>

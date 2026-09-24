@@ -14,25 +14,29 @@ try { localStorage.removeItem('vworldKey'); } catch (e) {}
 
 /* ───────── 공역 종류 ───────── */
 // level: 3=승인 없이 비행 불가, 2=승인 필요, 1=주의, 0=비행 가능 공역
+// color·pat: 지도에 실제로 그려지는 무늬(드론 원스톱 범례와 같음) — 빗금(hatch) / 채움(fill)
+// level: 판정 등급 (판정 결과 상자 색은 이 등급으로 정해짐)
 const ZONES = [
-  { id: 'LT_C_AISPRHC', name: '비행금지구역', level: 3, color: '#e53935', note: '비행승인 없이 비행 불가' },
-  { id: 'LT_C_AISCTRC', name: '관제권(공항 주변)', level: 3, color: '#d81b60', note: '원칙적으로 비행승인 필요' },
-  { id: 'LT_C_AISRESC', name: '비행제한구역', level: 2, color: '#fb8c00', note: '비행승인 필요' },
-  { id: 'LT_C_AISDNGC', name: '위험구역', level: 2, color: '#f4511e', note: '비행승인 필요' },
-  { id: 'LT_C_AISMOAC', name: '군작전구역', level: 1, color: '#fdd835', note: '군 작전 공역 — 비행 전 확인 권장', off: true },
-  { id: 'LT_C_AISUAC',  name: '초경량비행장치 공역', level: 0, color: '#43a047', note: '초경량비행장치 비행 공역' },
+  { id: 'LT_C_AISPRHC', name: '비행금지구역', level: 3, color: '#d32f2f', pat: 'hatch', note: '비행승인 없이 비행 불가' },
+  { id: 'LT_C_AISCTRC', name: '관제권(공항 주변)', level: 3, color: '#9fb596', pat: 'fill', note: '원칙적으로 비행승인 필요' },
+  { id: 'LT_C_AISRESC', name: '비행제한구역', level: 2, color: '#43a047', pat: 'hatch', note: '비행승인 필요' },
+  { id: 'LT_C_AISDNGC', name: '위험구역', level: 2, color: '#3cc8b4', pat: 'hatch', note: '비행승인 필요' },
+  { id: 'LT_C_AISMOAC', name: '군작전구역', level: 1, color: '#f9a825', pat: 'hatch', note: '군 작전 공역 — 비행 전 확인 권장', off: true },
+  { id: 'LT_C_AISUAC',  name: '초경량비행장치 공역', level: 0, color: '#f2a0a0', pat: 'fill', note: '초경량비행장치 비행 공역' },
   // ↓ V-World에 있는지 확인되지 않은 레이어: 조회에 성공한 경우에만 사용·표시
-  { id: 'LT_C_AISTEMP', name: '임시비행금지구역', level: 3, color: '#b71c1c', note: '행사·훈련 등으로 임시 지정 — 비행 불가', optional: true },
-  { id: 'LT_C_AISATZC', name: '비행장교통구역', level: 2, color: '#8d6e63', note: '비행장 주변 — 비행승인 필요', optional: true },
-  { id: 'LT_C_AISALTC', name: '경계구역', level: 1, color: '#a1887f', note: '훈련 등 경계 공역 — 비행 전 확인 권장', optional: true, off: true },
-  { id: 'LT_C_WGISNPGUG', name: '국립공원', level: 1, color: '#2e7d32', note: '국립공원 — 공원사무소 사전 허가 필요', optional: true, off: true },
-  { id: 'LT_C_AISDRONEZONE', name: '드론시범사업구역', level: 0, color: '#00897b', note: '드론 실증·시범사업 구역', optional: true, off: true }
+  { id: 'LT_C_AISTEMP', name: '임시비행금지구역', level: 3, color: '#c62828', pat: 'hatch', note: '행사·훈련 등으로 임시 지정 — 비행 불가', optional: true },
+  { id: 'LT_C_AISATZC', name: '비행장교통구역', level: 2, color: '#9e9e9e', pat: 'hatch', note: '비행장 주변 — 비행승인 필요', optional: true },
+  { id: 'LT_C_AISALTC', name: '경계구역', level: 1, color: '#b39b72', pat: 'hatch', note: '훈련 등 경계 공역 — 비행 전 확인 권장', optional: true, off: true },
+  { id: 'LT_C_WGISNPGUG', name: '국립공원', level: 1, color: '#2ecc40', pat: 'fill', note: '국립공원 — 공원사무소 사전 허가 필요', optional: true, off: true },
+  { id: 'LT_C_AISDRONEZONE', name: '드론시범사업구역', level: 0, color: '#ef6c00', pat: 'hatch', note: '드론 실증·시범사업 구역', optional: true, off: true }
 ];
+const swatch = z => `<span class="sw ${z.pat}" style="--c:${z.color}"></span>`;
 const verified = new Set(LS.get('verifiedLayers', []));
 function markVerified(z) {
   if (!z.optional || verified.has(z.id)) return;
   verified.add(z.id); LS.set('verifiedLayers', [...verified]);
   addZoneOverlay(z);
+  renderMapLegend();
 }
 
 /* ───────── 공통 유틸 ───────── */
@@ -296,7 +300,9 @@ let baseLayers = {}, overlayLayers = {}, layerCtl;
 
 function buildLayers() {
   if (layerCtl) { map.removeControl(layerCtl); }
+  quietToggle = true;
   Object.values(baseLayers).concat(Object.values(overlayLayers)).forEach(l => map.removeLayer(l));
+  quietToggle = false;
   baseLayers = {}; overlayLayers = {};
   const key = vkey();
   if (key) {
@@ -313,16 +319,32 @@ function buildLayers() {
 }
 function addZoneOverlay(z) {
   const key = vkey(); if (!key || !layerCtl) return;
-  const label = `<span style="color:${z.color}">■</span> ${z.name}`;
+  const label = `${swatch(z)} ${z.name}`;
   if (overlayLayers[label]) return;
   const wms = L.tileLayer.wms('https://api.vworld.kr/req/wms', {
     layers: z.id.toLowerCase(), styles: z.id.toLowerCase(), format: 'image/png', transparent: true,
     version: '1.3.0', key, domain: location.origin, opacity: z.level === 0 ? 0.45 : 0.55, maxZoom: 19
   });
   overlayLayers[label] = wms;
+  overlayZone.set(wms, z);
   layerCtl.addOverlay(wms, label);
-  if (!z.off) wms.addTo(map); // 범위가 넓은 구역은 기본 꺼짐
+  const saved = LS.get('layerOn', {});
+  const on = z.id in saved ? saved[z.id] : !z.off; // 사용자가 정한 값 우선, 없으면 기본값(범위가 넓은 구역은 꺼짐)
+  if (on) { quietToggle = true; wms.addTo(map); quietToggle = false; }
+  else hiddenZones.add(z.id);
 }
+// 오른쪽 위 구역 목록에서 켜고 끄면: 선택을 기억하고, 판정 때 그린 강조선도 같이 숨기거나 보이게
+const overlayZone = new Map(), hiddenZones = new Set();
+let quietToggle = false;
+function onOverlayToggle(e, on) {
+  const z = overlayZone.get(e.layer); if (!z) return;
+  if (on) hiddenZones.delete(z.id); else hiddenZones.add(z.id);
+  if (quietToggle) return;
+  const saved = LS.get('layerOn', {}); saved[z.id] = on; LS.set('layerOn', saved);
+  if (lastResult) drawZones(lastResult);
+}
+map.on('overlayadd', e => onOverlayToggle(e, true));
+map.on('overlayremove', e => onOverlayToggle(e, false));
 buildLayers();
 
 let pinMarker = null, meMarker = null, meCircle = null, zoneGeo = L.layerGroup().addTo(map);
@@ -428,7 +450,7 @@ function applyWeatherToVerdict(r, iss) {
 }
 
 function zoneRow(x, showDist) {
-  return `<div class="zone"><i style="background:${x.zone.color}"></i>
+  return `<div class="zone">${swatch(x.zone)}
     <div class="z-main"><div class="z-name">${esc(x.zone.name)}</div>
       <div class="z-sub">${esc(x.label || x.zone.note)}</div>${propsTable(x.feature.properties)}</div>
     ${showDist ? `<div class="z-dist">${fmtDist(x.dist)}</div>` : ''}</div>`;
@@ -486,7 +508,9 @@ function drawZones(r) {
   zoneGeo.clearLayers();
   const items = r.inside.concat(r.nearby.slice(0, 6));
   for (const x of items) {
-    L.geoJSON(x.feature, { style: { color: x.zone.color, weight: 2, fillOpacity: x.dist === 0 ? 0.18 : 0.06, dashArray: x.dist === 0 ? null : '6 4' }, interactive: false }).addTo(zoneGeo);
+    if (hiddenZones.has(x.zone.id)) continue; // 목록에서 끈 구역은 강조선도 숨김
+    const inside = x.dist === 0;
+    L.geoJSON(x.feature, { style: { color: x.zone.color, weight: inside ? 3 : 2, opacity: 0.95, fillOpacity: inside ? 0.06 : 0, dashArray: inside ? null : '6 4' }, interactive: false }).addTo(zoneGeo);
   }
 }
 
@@ -824,6 +848,14 @@ renderChecks();
   }
 })();
 
+/* ───────── 안내 탭: 지도 구역 표시 범례 ───────── */
+function renderMapLegend() {
+  const box = $('#mapLegend'); if (!box) return;
+  box.innerHTML = ZONES.filter(z => !z.optional || verified.has(z.id))
+    .map(z => `<li>${swatch(z)}<span>${esc(z.name)} <span class="muted">— ${esc(z.note)}</span></span></li>`).join('');
+}
+renderMapLegend();
+
 /* ───────── 앱에서 실행 중이면 배지를 '앱버전'으로 ───────── */
 if (window.NFZApp) {
   const bd = $('.appbar .badge');
@@ -837,5 +869,5 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
 }
 
 // 테스트용 노출
-window.__dz = { containsPoint, distToBoundary, makeVerdict, ZONES };
+window.__dz = { containsPoint, distToBoundary, makeVerdict, ZONES, hiddenZones, overlayZone, drawZones };
 })();

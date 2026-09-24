@@ -79,7 +79,7 @@ a{color:var(--primary)}
 .section-title{font-size:11px;font-weight:700;color:var(--muted);margin:11px 0 5px}
 .zone{display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--line);font-size:11px}
 .zone:last-child{border-bottom:0}
-.zone i{flex:none;width:10px;height:10px;border-radius:2px;margin-top:3px}
+.zone .sw{margin-top:3px}
 .zone .z-main{flex:1;min-width:0}
 .zone .z-name{font-weight:600}
 .zone .z-sub{color:var(--muted);font-size:11px;word-break:break-all}
@@ -175,3 +175,11 @@ a.btn{text-decoration:none;color:var(--primary)}
 @supports (-webkit-touch-callout:none){ input,textarea,select{font-size:16px!important} }
 
 .searchbar input::placeholder{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* 구역 무늬 표시(드론 원스톱 범례와 같은 방식): 빗금 / 채움 */
+.sw{display:inline-block;flex:none;width:16px;height:11px;border:2px solid var(--c);border-radius:2px;vertical-align:-1px;background:#fff}
+.sw.hatch{background:repeating-linear-gradient(135deg,#fff 0 3px,var(--c) 3px 4.5px)}
+.sw.fill{background:var(--c)}
+.leaflet-control-layers label{display:flex;align-items:center;gap:2px;margin:3px 0}
+.leaflet-control-layers label .sw{margin:0 5px 0 2px}
+.legend li .sw{margin-top:0}
