@@ -352,15 +352,39 @@ async function fetchWeather(lat, lon) {
   const r = await fetch(u); if (!r.ok) throw new Error('날씨 오류');
   return r.json();
 }
+// 기체별 최대 내풍 성능(제조사 공식 사양, m/s) — 강풍 판정 기준
+const DRONES = [
+  { id: 'std', name: '기체 선택 안 함 (250g급 기준)', wind: 10.7 },
+  { id: 'mini3', name: 'DJI Mini 3', wind: 10.7, g: 248 },
+  { id: 'mini3pro', name: 'DJI Mini 3 Pro', wind: 10.7, g: 249 },
+  { id: 'mini4k', name: 'DJI Mini 4K', wind: 10.7, g: 249 },
+  { id: 'mini4pro', name: 'DJI Mini 4 Pro', wind: 10.7, g: 249 },
+  { id: 'mini5pro', name: 'DJI Mini 5 Pro', wind: 12, g: 249 },
+  { id: 'neo', name: 'DJI Neo', wind: 8, g: 135 },
+  { id: 'flip', name: 'DJI Flip', wind: 10.7, g: 249 },
+  { id: 'air3', name: 'DJI Air 3', wind: 12, g: 720 },
+  { id: 'air3s', name: 'DJI Air 3S', wind: 12, g: 724 },
+  { id: 'mavic3', name: 'DJI Mavic 3 Classic', wind: 12, g: 895 },
+  { id: 'mavic3pro', name: 'DJI Mavic 3 Pro', wind: 12, g: 958 },
+  { id: 'mavic4pro', name: 'DJI Mavic 4 Pro', wind: 12, g: 1063 },
+  { id: 'avata2', name: 'DJI Avata 2', wind: 10.7, g: 377 },
+  { id: 'inspire2', name: 'DJI Inspire 2', wind: 10, g: 3440 },
+  { id: 'inspire3', name: 'DJI Inspire 3', wind: 12, g: 3995, note: '이착륙 12m/s · 비행 중 14m/s' },
+  { id: 'etc-s', name: '기타 소형 (250g 미만)', wind: 8 },
+  { id: 'etc-m', name: '기타 중형 (250g~2kg)', wind: 10 }
+];
+const currentDrone = () => DRONES.find(d => d.id === LS.get('drone', 'std')) || DRONES[0];
 function windDir(deg) { return ['북', '북동', '동', '남동', '남', '남서', '서', '북서'][Math.round(((deg % 360) / 45)) % 8] + '풍'; }
 function weatherIssues(w) {
-  const c = w.current, d = w.daily;
+  const c = w.current, d = w.daily, L = currentDrone().wind;
   const sunrise = d.sunrise[0].slice(11, 16), sunset = d.sunset[0].slice(11, 16), nowHM = c.time.slice(11, 16);
   return {
     sunrise, sunset, nowHM,
     night: nowHM < sunrise || nowHM >= sunset,
-    windStrong: c.wind_gusts_10m >= 10 || c.wind_speed_10m >= 8,
-    windMid: !(c.wind_gusts_10m >= 10 || c.wind_speed_10m >= 8) && (c.wind_gusts_10m >= 7 || c.wind_speed_10m >= 5),
+    // 강풍: 돌풍이 기체 한계 이상 또는 평균 풍속이 한계의 75% 이상 / 다소 강함: 돌풍 65%·풍속 50% 이상
+    windStrong: c.wind_gusts_10m >= L || c.wind_speed_10m >= L * 0.75,
+    windMid: !(c.wind_gusts_10m >= L || c.wind_speed_10m >= L * 0.75) && (c.wind_gusts_10m >= L * 0.65 || c.wind_speed_10m >= L * 0.5),
+    limit: L,
     rain: c.precipitation > 0 || [51, 53, 55, 61, 63, 65, 66, 67, 71, 73, 75, 77, 80, 81, 82, 85, 86, 95, 96, 99].includes(c.weather_code),
     fog: c.weather_code === 45 || c.weather_code === 48
   };
@@ -370,8 +394,9 @@ function weatherHtml(w) {
   const { sunrise, sunset, nowHM, night } = weatherIssues(w);
   const notes = [];
   const iss = weatherIssues(w);
-  if (iss.windStrong) notes.push('💨 바람이 강해 소형 드론 비행은 추천하지 않습니다.');
-  else if (iss.windMid) notes.push('💨 바람이 다소 강합니다. 높이 올라갈수록 더 세질 수 있어요.');
+  const dr = currentDrone(), who = dr.id === 'std' ? '250g급 기체' : dr.name;
+  if (iss.windStrong) notes.push(`💨 강풍 — ${who}의 내풍 한계(${dr.wind}m/s) 기준으로 지금 바람이 너무 강합니다.`);
+  else if (iss.windMid) notes.push(`💨 바람이 다소 강합니다(${who} 한계 ${dr.wind}m/s). 높이 올라갈수록 더 세질 수 있어요.`);
   if (iss.rain) notes.push('🌧 강수가 있습니다. 방수 기체가 아니면 비행을 피하세요.');
   if (iss.fog) notes.push('🌫 안개로 가시권 확보가 어렵습니다.');
   if (night) notes.push(`🌙 지금은 야간(일몰 ${sunset} 이후~일출 ${sunrise} 전)이라 특별비행승인 없이는 비행할 수 없습니다.`);
@@ -385,7 +410,11 @@ function weatherHtml(w) {
       <div><b>${sunset}</b><span>일몰</span></div>
       <div><b>${c.precipitation}</b><span>강수 mm</span></div>
     </div>
-    <div class="wx-note">${notes.join('<br>')}</div>`;
+    <div class="wx-note">${notes.join('<br>')}</div>
+    <label class="drone-pick">내 기체
+      <select id="dronePick">${DRONES.map(d => `<option value="${d.id}"${d.id === dr.id ? ' selected' : ''}>${esc(d.name)}</option>`).join('')}</select>
+    </label>
+    <p class="muted small">바람 기준: 돌풍 ${dr.wind}m/s 또는 평균 ${(dr.wind * 0.75).toFixed(1)}m/s 이상이면 강풍${dr.note ? ` (${dr.note})` : ''}${dr.g ? ` · ${dr.g >= 1000 ? (dr.g / 1000).toFixed(2) + 'kg' : dr.g + 'g'}` : ''}</p>`;
 }
 
 /* ───────── 지도 ───────── */
@@ -539,18 +568,28 @@ async function checkAt(lat, lon, label, opt = {}) {
   if (!incomplete) nationalRefresh();
   if (notamData) { updateNotamButton(); autoOpenNotams(); }
 
+  res.baseVerdict = res.verdict;
   fetchWeather(lat, lon).then(w => {
     if (seq !== checkSeq) return;
-    const box = $('#wxBox'); if (box) box.innerHTML = weatherHtml(w);
-    applyWeatherToVerdict(res, weatherIssues(w));
+    res.wx = w;
+    showWeather(res);
   }).catch(() => { const box = $('#wxBox'); if (box) box.innerHTML = '<p class="muted small">날씨 정보를 불러오지 못했습니다.</p>'; });
 }
 
+function showWeather(r) {
+  const box = $('#wxBox'); if (!box || !r.wx) return;
+  box.innerHTML = weatherHtml(r.wx);
+  r.verdict = r.baseVerdict || r.verdict;
+  applyWeatherToVerdict(r, weatherIssues(r.wx));
+  $('#dronePick').addEventListener('change', e => { LS.set('drone', e.target.value); showWeather(r); });
+}
 // 공역 판정 + 현재 조건(야간·바람·비·안개)을 합쳐 맨 위 판정을 갱신
 function applyWeatherToVerdict(r, iss) {
+  const el0 = $('#sheetBody .verdict'), v0 = r.verdict;
+  if (el0) { el0.className = 'verdict ' + v0.cls; el0.innerHTML = `<div class="ico">${v0.ico}</div><div><b>${esc(v0.title)}</b><small>${esc(v0.desc)}</small></div>`; }
   const probs = [];
   if (iss.night) probs.push(`야간(일몰 ${iss.sunset}~일출 ${iss.sunrise})`);
-  if (iss.windStrong) probs.push('강풍');
+  if (iss.windStrong) probs.push(`강풍(${currentDrone().id === 'std' ? '250g급' : currentDrone().name} 기준)`);
   if (iss.rain) probs.push('비·눈');
   if (iss.fog) probs.push('안개');
   if (!probs.length) return;
@@ -826,7 +865,8 @@ function openLogForm(opt = {}) {
       f.verdict.value = JSON.stringify({ code: r.verdict.code, title: r.verdict.title, cls: r.verdict.cls });
     }
     if (opt.minutes) f.minutes.value = opt.minutes;
-    const lastDrone = logs[0] && logs[0].drone; if (lastDrone) f.drone.value = lastDrone;
+    const dr = currentDrone(), lastDrone = logs[0] && logs[0].drone;
+    if (dr.id !== 'std' && !dr.id.startsWith('etc')) f.drone.value = dr.name; else if (lastDrone) f.drone.value = lastDrone;
   }
   $('#logCoord').textContent = f.lat.value ? `위치: ${(+f.lat.value).toFixed(5)}, ${(+f.lng.value).toFixed(5)}${f.verdict.value ? ' · 판정: ' + JSON.parse(f.verdict.value).title : ''}` : '위치 정보 없음 (지도에서 지점을 확인한 뒤 기록하면 자동으로 들어갑니다)';
   $('#logModal').classList.remove('hidden');
