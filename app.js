@@ -479,6 +479,7 @@ function updateKpBadge(v) {
   const lv = kpLevel(v.now);
   el.className = 'kp-badge ' + lv.cls;
   $('#kpVal').textContent = v.now;
+  fitMapButtons();
 }
 function refreshKp() { if (!document.hidden) fetchKp().then(updateKpBadge).catch(() => {}); }
 refreshKp();
@@ -604,6 +605,7 @@ function buildLayers() {
   const firstBase = Object.values(baseLayers)[0]; firstBase.addTo(map);
   layerCtl = L.control.layers(baseLayers, {}, { position: 'topright', collapsed: true }).addTo(map);
   map.removeControl(zoomCtl); zoomCtl.addTo(map); // 레이어 버튼을 다시 만들어도 확대·축소가 늘 그 아래에 오도록
+  setTimeout(fitMapButtons, 0);
   if (key) for (const z of ZONES) if (!z.optional || verified.has(z.id)) addZoneOverlay(z);
 }
 // 지도 무늬 칸(타일)을 못 받아오면 잠시 뒤 최대 3번 다시 요청 → 빈 네모 칸 방지
@@ -671,7 +673,18 @@ function setSheetHeight() {
   document.documentElement.style.setProperty('--sheet-h', h + 'px');
   if (lastSheetH && h !== lastSheetH) map.panBy([0, Math.round((h - lastSheetH) / 2)], { animate: true, duration: 0.25 });
   lastSheetH = h;
+  fitMapButtons();
 }
+// 오른쪽 버튼 줄: 위(레이어·확대축소)와 아래(Kp·내 위치)가 겹칠 만큼 지도가 좁으면 확대·축소 버튼을 숨김
+function fitMapButtons() {
+  const zc = document.querySelector('.leaflet-control-zoom'), col = $('.fab-col');
+  if (!zc || !col || !col.offsetParent) return;
+  zc.classList.remove('squeezed');
+  const zb = zc.getBoundingClientRect();
+  const colTop = col.offsetParent.getBoundingClientRect().bottom - sheet.offsetHeight - 10 - col.offsetHeight; // 움직이는 중에도 최종 위치로 계산
+  if (zb.height && zb.bottom + 8 > colTop) zc.classList.add('squeezed');
+}
+window.addEventListener('resize', fitMapButtons);
 // 검색창 아래 ~ 결과 창 위, 실제로 보이는 지도 영역의 가운데에 지점이 오도록 이동
 function setViewVisible(latlng, zoom) {
   const H = map.getSize().y;
