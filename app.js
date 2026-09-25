@@ -666,7 +666,9 @@ function renderResult(r) {
   if (r.inside.length) h += `<div class="section-title">이 지점이 속한 공역</div>` + r.inside.map(x => zoneRow(x, false)).join('');
   const near = r.nearby.slice(0, 6);
   if (near.length) h += `<div class="section-title">반경 ${fmtDist(CFG.CHECK_RADIUS_M)} 내 주의 공역</div>` + near.map(x => zoneRow(x, true)).join('');
-  if (r.failed.length && r.verdict.code !== 'error') h += `<p class="muted small">일부 데이터 조회 실패: ${r.failed.map(f => f.zone.name).join(', ')}</p>`;
+  // 판정에 영향 없는 공역(군작전구역·초경량비행장치 공역)은 조회에 실패해도 표시하지 않음
+  const failShow = r.failed.filter(f => f.zone.level >= 1);
+  if (failShow.length && r.verdict.code !== 'error') h += `<p class="muted small">일부 데이터 조회 실패: ${failShow.map(f => esc(f.zone.name) + (f.error ? ` (${esc(f.error)})` : '')).join(', ')}</p>`;
   if (r.fromNational && r.fromNational.length) {
     const d = t => { const k = new Date(t); return `${k.getMonth() + 1}/${k.getDate()}`; };
     h += `<p class="muted small">ℹ️ ${r.fromNational.map(x => `${esc(x.zone.name)}은(는) 서버 응답이 없어 휴대폰에 저장된 전국 자료(${d(x.t)} 받음)로 확인했어요.`).join(' ')}</p>`;
