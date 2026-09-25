@@ -136,20 +136,67 @@ function propsTable(props) {
 }
 
 /* ───────── 공역 판정 ───────── */
+// 필수 공역이 계속 실패하면 → 휴대폰에 저장해 둔 전국 자료(없으면 지금 받아서)로 대신 판정
+const KOREA_BOX = ['124', '32.5', '132', '39'];
+const NATIONAL_KEEP = ['LT_C_AISPRHC', 'LT_C_AISCTRC']; // 전국 자료를 미리 받아 둘 공역(수가 적고 가장 중요)
+const NATIONAL_DAYS = 30;
+const nationalMem = new Map();
+function nationalGet(id) {
+  if (nationalMem.has(id)) return nationalMem.get(id);
+  const c = LS.get('nat:' + id, null);
+  if (c && Array.isArray(c.f)) { nationalMem.set(id, c); return c; }
+  return null;
+}
+async function nationalFetch(zone) {
+  const f = await queryLayerOnce(zone, KOREA_BOX, 30000);
+  const c = { t: Date.now(), f };
+  nationalMem.set(zone.id, c);
+  try { localStorage.setItem('nat:' + zone.id, JSON.stringify(c)); } catch (e) {} // 용량이 넘치면 이번 실행 동안만 사용
+  return c;
+}
+function geomBox(g) {
+  let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+  for (const poly of polygonsOf(g)) for (const ring of poly) for (const [x, y] of ring) {
+    if (x < x1) x1 = x; if (x > x2) x2 = x; if (y < y1) y1 = y; if (y > y2) y2 = y;
+  }
+  return [x1, y1, x2, y2];
+}
+function inBox(features, bbox) {
+  const [bx1, by1, bx2, by2] = bbox.map(Number);
+  return features.filter(f => { const [x1, y1, x2, y2] = geomBox(f.geometry); return x1 <= bx2 && x2 >= bx1 && y1 <= by2 && y2 >= by1; });
+}
+// 판정이 잘 끝난 뒤 조용히 전국 자료를 받아 둠 (30일에 한 번)
+let nationalBusy = false;
+function nationalRefresh() {
+  if (nationalBusy) return;
+  const todo = ZONES.filter(z => NATIONAL_KEEP.includes(z.id) && !(nationalGet(z.id) && Date.now() - nationalGet(z.id).t < NATIONAL_DAYS * 864e5));
+  if (!todo.length) return;
+  nationalBusy = true;
+  setTimeout(async () => { for (const z of todo) { try { await nationalFetch(z); } catch (e) {} } nationalBusy = false; }, 5000);
+}
 async function queryLayer(zone, bbox) {
   try { return await queryLayerOnce(zone, bbox); }
   catch (e) {
     if (zone.optional) throw e;
     await new Promise(r => setTimeout(r, 800));
-    return queryLayerOnce(zone, bbox); // 필수 공역은 한 번 더
+    try { return await queryLayerOnce(zone, bbox); } // 필수 공역은 한 번 더
+    catch (e2) {
+      if (zone.level < 1) throw e2; // 판정에 영향 없는 공역은 대체하지 않음
+      let c = nationalGet(zone.id);
+      if (!c) { try { c = await nationalFetch(zone); } catch (e3) {} }
+      if (!c) throw e2;
+      const out = inBox(c.f, bbox);
+      out.fromNational = c.t;
+      return out;
+    }
   }
 }
-async function queryLayerOnce(zone, bbox) {
+async function queryLayerOnce(zone, bbox, timeout) {
   const res = await jsonp('https://api.vworld.kr/req/data', Object.assign(vwBase(), {
     service: 'data', request: 'GetFeature', version: '2.0', data: zone.id,
     size: '1000', page: '1', geometry: 'true', attribute: 'true', crs: 'EPSG:4326',
     geomFilter: `BOX(${bbox.join(',')})`
-  }));
+  }), timeout);
   const r = res && res.response;
   if (!r) throw new Error('잘못된 응답');
   if (r.status === 'NOT_FOUND') return [];
@@ -160,10 +207,11 @@ async function queryLayerOnce(zone, bbox) {
 async function analyze(lat, lon) {
   const bbox = bboxAround(lat, lon, CFG.CHECK_RADIUS_M);
   const settled = await Promise.allSettled(ZONES.map(z => queryLayer(z, bbox)));
-  const inside = [], nearby = [], failed = [];
+  const inside = [], nearby = [], failed = [], fromNational = [];
   settled.forEach((s, i) => {
     const zone = ZONES[i];
     if (s.status === 'rejected') { if (!zone.optional) failed.push({ zone, error: s.reason && s.reason.message }); return; }
+    if (s.value.fromNational) fromNational.push({ zone, t: s.value.fromNational });
     markVerified(zone);
     for (const f of s.value) {
       const item = { zone, feature: f, label: featureLabel(f.properties) };
@@ -188,7 +236,7 @@ async function analyze(lat, lon) {
   }
   inside.sort((a, b) => b.zone.level - a.zone.level);
   nearby.sort((a, b) => a.dist - b.dist);
-  return { lat, lon, inside, nearby, failed, verdict: makeVerdict(inside, nearby, failed) };
+  return { lat, lon, inside, nearby, failed, fromNational, verdict: makeVerdict(inside, nearby, failed) };
 }
 
 function makeVerdict(inside, nearby, failed) {
@@ -197,7 +245,7 @@ function makeVerdict(inside, nearby, failed) {
   const near = nearby[0];
   if (failed.length >= ZONES.filter(z => !z.optional).length) {
     const why = [...new Set(failed.map(f => f.error).filter(Boolean))].slice(0, 2).join(' / ');
-    return { cls: 'v-gray', ico: '❔', title: '판정할 수 없음', desc: '공역 데이터를 불러오지 못했습니다. 잠시 후 ⟳ 새로고침으로 다시 시도하세요.' + (why ? ` (원인: ${why})` : ''), code: 'error' };
+    return { cls: 'v-gray', ico: '❔', title: '판정할 수 없음', desc: '공역 데이터를 불러오지 못했습니다. 아래 [다시 확인]을 눌러 주세요.' + (why ? ` (원인: ${why})` : ''), code: 'error' };
   }
   if (top === 3) {
     const names = [...new Set(inside.filter(x => x.zone.level === 3).map(x => x.zone.name))].join(', ');
@@ -210,7 +258,8 @@ function makeVerdict(inside, nearby, failed) {
   const critical = failed.filter(f => f.zone.level >= 1); // 금지·제한·주의 구역 데이터가 빠졌을 때만 판정 보류
   if (critical.length && top < 2) {
     const names = critical.map(f => f.zone.name).join(', ');
-    return { cls: 'v-gray', ico: '⚠️', title: '확인 불완전 — 다시 확인 필요', desc: `${names} 데이터를 불러오지 못해 비행 가능 여부를 확정할 수 없습니다. 잠시 후 ⟳ 새로고침으로 다시 확인하세요.`, code: 'partial' };
+    const why = [...new Set(critical.map(f => f.error).filter(Boolean))].slice(0, 2).join(' / ');
+    return { cls: 'v-gray', ico: '⚠️', title: '확인 불완전 — 다시 확인 필요', desc: `${names} 데이터를 불러오지 못해 비행 가능 여부를 확정할 수 없습니다. 아래 [다시 확인]을 눌러 주세요.` + (why ? ` (원인: ${why})` : ''), code: 'partial' };
   }
   // 이 지점이 시간제(지금 비활성)·곧 시작될 항공고시보 구역 안이면 따로 알림
   const soon = nearby.find(x => x.notam && x.dist === 0);
@@ -460,7 +509,7 @@ function sheetHtml(html) { $('#sheetBody').innerHTML = html; $('#sheetBody').scr
 
 /* ───────── 판정 실행 ───────── */
 let checkSeq = 0;
-async function checkAt(lat, lon, label) {
+async function checkAt(lat, lon, label, opt = {}) {
   const seq = ++checkSeq;
   if (label !== '내 위치') $('#btnLocate').classList.remove('found');
   if (!vkey()) {
@@ -468,8 +517,10 @@ async function checkAt(lat, lon, label) {
     return;
   }
   if (pinMarker) pinMarker.setLatLng([lat, lon]); else pinMarker = L.marker([lat, lon]).addTo(map);
-  zoneGeo.clearLayers();
-  sheetHtml(`<div class="hint"><span class="spinner"></span>공역 정보를 확인하는 중…</div>`);
+  if (!opt.silent) {
+    zoneGeo.clearLayers();
+    sheetHtml(`<div class="hint"><span class="spinner"></span>공역 정보를 확인하는 중…</div>`);
+  }
 
   const [res, addr] = await Promise.all([analyze(lat, lon), reverseGeocode(lat, lon)]);
   if (seq !== checkSeq) return;
@@ -479,6 +530,13 @@ async function checkAt(lat, lon, label) {
   lastResult = res;
   renderResult(res);
   drawZones(res);
+  const incomplete = res.verdict.code === 'partial' || res.verdict.code === 'error';
+  if (incomplete && !opt.retried) {
+    // 브이월드가 잠깐 응답하지 않은 경우가 많아서 몇 초 뒤 한 번 자동으로 다시 확인
+    const note = $('#recheckNote'); if (note) note.textContent = '잠시 후 자동으로 한 번 더 확인해요…';
+    setTimeout(() => { if (seq === checkSeq) checkAt(lat, lon, label, { retried: true, silent: true }); }, 4000);
+  }
+  if (!incomplete) nationalRefresh();
   if (notamData) { updateNotamButton(); autoOpenNotams(); }
 
   fetchWeather(lat, lon).then(w => {
@@ -528,6 +586,7 @@ function renderResult(r) {
   const isMe = r.label === '내 위치';
   const sub = !isMe && r.addr && r.addr.road && r.addr.parcel ? r.addr.parcel : '';
   let h = `<div class="verdict ${v.cls}"><div class="ico">${v.ico}</div><div><b>${v.title}</b><small>${esc(v.desc)}</small></div></div>
+    ${v.code === 'partial' || v.code === 'error' ? `<div class="recheck"><button class="btn sm primary" id="btnRecheck">⟳ 다시 확인</button><span class="muted small" id="recheckNote"></span></div>` : ''}
     <p class="addr"><b>${esc(addrLine)}</b><br><span class="muted">${isMe ? '위도 ' + r.lat.toFixed(5) + ' · 경도 ' + r.lon.toFixed(5) : esc(sub) + ' ' + r.lat.toFixed(5) + ', ' + r.lon.toFixed(5)}</span></p>
     <div class="row-btns">
       <button class="btn sm" id="btnFav">☆ 장소 저장</button>
@@ -540,6 +599,10 @@ function renderResult(r) {
   const near = r.nearby.slice(0, 6);
   if (near.length) h += `<div class="section-title">반경 ${fmtDist(CFG.CHECK_RADIUS_M)} 내 주의 공역</div>` + near.map(x => zoneRow(x, true)).join('');
   if (r.failed.length && r.verdict.code !== 'error') h += `<p class="muted small">일부 데이터 조회 실패: ${r.failed.map(f => f.zone.name).join(', ')}</p>`;
+  if (r.fromNational && r.fromNational.length) {
+    const d = t => { const k = new Date(t); return `${k.getMonth() + 1}/${k.getDate()}`; };
+    h += `<p class="muted small">ℹ️ ${r.fromNational.map(x => `${esc(x.zone.name)}은(는) 서버 응답이 없어 휴대폰에 저장된 전국 자료(${d(x.t)} 받음)로 확인했어요.`).join(' ')}</p>`;
+  }
   h += `<div id="wxBox"><div class="hint"><span class="spinner"></span>날씨 확인 중…</div></div>
     <p class="muted small" style="margin-top:12px">※ 참고용입니다. 항공고시보(임시 구역)는 드론 관련만 30분 간격으로 반영돼 늦을 수 있으니 비행 전 드론 원스톱에서 최종 확인하세요.</p>`;
   sheetHtml(h);
@@ -547,6 +610,7 @@ function renderResult(r) {
   $('#btnLogHere').onclick = () => openLogForm({ fromResult: r });
   $('#btnFlyStart').onclick = () => startTimer();
   $('#btnCopy').onclick = () => copyPoint(r);
+  const rb = $('#btnRecheck'); if (rb) rb.onclick = () => checkAt(r.lat, r.lon, r.label || undefined, { retried: true });
 }
 
 // 비행승인·촬영허가 신청서에 붙여넣기 좋게 정리
@@ -1203,5 +1267,5 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
 }
 
 // 테스트용 노출
-window.__dz = { containsPoint, distToBoundary, makeVerdict, ZONES, hiddenZones, overlayZone, drawZones, notamStatus, scheduleText, scheduleState, kstDayWindows, get notamData() { return notamData; } };
+window.__dz = { nationalGet, containsPoint, distToBoundary, makeVerdict, ZONES, hiddenZones, overlayZone, drawZones, notamStatus, scheduleText, scheduleState, kstDayWindows, get notamData() { return notamData; } };
 })();
