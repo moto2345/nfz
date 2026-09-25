@@ -101,7 +101,40 @@ function jsonpRaw(url, params, timeout) {
     document.head.appendChild(s);
   });
 }
-const vwBase = () => ({ key: vkey(), domain: location.origin, format: 'json', errorFormat: 'json' });
+// 브이월드는 인증키에 등록한 '서비스 주소'와 요청의 domain 값을 비교해서 다르면 INCORRECT_KEY로 거절함.
+// 등록 주소가 경로까지 포함(moto2345.github.io/nfz)이라 이 페이지 주소(경로 포함)를 먼저 쓰고,
+// 그래도 거절되면 다른 형식으로 바꿔 보고, 통한 형식을 기억해서 다음부터 그것으로 보냄
+const PAGE_BASE = location.origin + location.pathname.replace(/[^/]*$/, '');
+const VW_DOMS = { base: PAGE_BASE, none: null, origin: location.origin };
+const VW_ORDER = ['base', 'none', 'origin'];
+let vwDom = (d => (d in VW_DOMS ? d : 'base'))(LS.get('vwDom', 'base'));
+function vwParams(extra, dom = vwDom) {
+  const p = Object.assign({ key: vkey(), format: 'json', errorFormat: 'json' }, extra);
+  if (VW_DOMS[dom]) p.domain = VW_DOMS[dom];
+  return p;
+}
+const isKeyErr = res => { const r = res && res.response; return !!(r && r.status === 'ERROR' && r.error && r.error.code === 'INCORRECT_KEY'); };
+async function vwCall(path, extra, timeout) {
+  const url = 'https://api.vworld.kr/req/' + path;
+  const res = await jsonp(url, vwParams(extra), timeout);
+  if (!isKeyErr(res)) return res;
+  for (const d of VW_ORDER) { // 인증키 거절 → 다른 domain 형식으로 한 번씩
+    if (d === vwDom) continue;
+    const r2 = await jsonp(url, vwParams(extra, d), timeout).catch(() => null);
+    if (r2 && r2.response && !isKeyErr(r2)) { setVwDom(d); return r2; }
+  }
+  return res;
+}
+function setVwDom(d) {
+  if (d === vwDom) return;
+  vwDom = d; LS.set('vwDom', d);
+  // 공역 지도 그림(WMS)도 같은 형식으로 다시 받기
+  Object.values(overlayLayers).forEach(l => {
+    if (!l.wmsParams) return;
+    if (VW_DOMS[d]) l.wmsParams.domain = VW_DOMS[d]; else delete l.wmsParams.domain;
+    l.redraw();
+  });
+}
 
 /* ───────── 기하 계산 ───────── */
 function toLocal(lon, lat, lat0, lon0) {
@@ -231,11 +264,11 @@ async function queryLayer(zone, bbox) {
   }
 }
 async function queryLayerOnce(zone, bbox, timeout) {
-  const res = await jsonp('https://api.vworld.kr/req/data', Object.assign(vwBase(), {
+  const res = await vwCall('data', {
     service: 'data', request: 'GetFeature', version: '2.0', data: zone.id,
     size: '1000', page: '1', geometry: 'true', attribute: 'true', crs: 'EPSG:4326',
     geomFilter: `BOX(${bbox.join(',')})`
-  }), timeout);
+  }, timeout);
   const r = res && res.response;
   if (!r) throw new Error('잘못된 응답');
   if (r.status === 'NOT_FOUND') return [];
@@ -355,9 +388,9 @@ function setMyAddress(addr) {
 }
 async function reverseGeocode(lat, lon) {
   try {
-    const res = await jsonp('https://api.vworld.kr/req/address', Object.assign(vwBase(), {
+    const res = await vwCall('address', {
       service: 'address', request: 'getAddress', version: '2.0', crs: 'epsg:4326', point: `${lon},${lat}`, type: 'both'
-    }), 8000);
+    }, 8000);
     const r = res && res.response;
     if (r && r.status === 'OK' && r.result && r.result.length) {
       const road = r.result.find(x => x.type === 'road'), parcel = r.result.find(x => x.type === 'parcel');
@@ -368,12 +401,12 @@ async function reverseGeocode(lat, lon) {
 }
 
 async function searchPlaces(q) {
-  const common = Object.assign(vwBase(), { service: 'search', request: 'search', version: '2.0', crs: 'EPSG:4326', size: '8', page: '1', query: q });
+  const common = { service: 'search', request: 'search', version: '2.0', crs: 'EPSG:4326', size: '8', page: '1', query: q };
   const reqs = [
-    jsonp('https://api.vworld.kr/req/search', Object.assign({}, common, { type: 'place' })),
-    jsonp('https://api.vworld.kr/req/search', Object.assign({}, common, { type: 'address', category: 'road' })),
-    jsonp('https://api.vworld.kr/req/search', Object.assign({}, common, { type: 'address', category: 'parcel' })),
-    jsonp('https://api.vworld.kr/req/search', Object.assign({}, common, { type: 'district', category: 'L4' }))
+    vwCall('search', Object.assign({}, common, { type: 'place' })),
+    vwCall('search', Object.assign({}, common, { type: 'address', category: 'road' })),
+    vwCall('search', Object.assign({}, common, { type: 'address', category: 'parcel' })),
+    vwCall('search', Object.assign({}, common, { type: 'district', category: 'L4' }))
   ];
   const out = [], seen = new Set();
   (await Promise.allSettled(reqs)).forEach((s, i) => {
@@ -570,13 +603,13 @@ function addZoneOverlay(z) {
   const key = vkey(); if (!key || !layerCtl) return;
   const label = `${swatch(z)} ${z.name}`;
   if (overlayLayers[label]) return;
-  const wms = L.tileLayer.wms('https://api.vworld.kr/req/wms', {
+  const wms = L.tileLayer.wms('https://api.vworld.kr/req/wms', Object.assign({
     layers: z.id.toLowerCase(), styles: z.id.toLowerCase(), format: 'image/png', transparent: true,
-    version: '1.3.0', key, domain: location.origin, opacity: z.level === 0 ? 0.45 : 0.55, maxZoom: 19,
+    version: '1.3.0', key, opacity: z.level === 0 ? 0.45 : 0.55, maxZoom: 19,
     tileSize: 512,            // 큰 칸으로 받아 요청 수를 1/4로 줄임
     updateWhenZooming: false, // 확대·축소 중간 단계는 받지 않음
     keepBuffer: 1
-  });
+  }, VW_DOMS[vwDom] ? { domain: VW_DOMS[vwDom] } : {}));
   retryTiles(wms);
   overlayLayers[label] = wms;
   overlayZone.set(wms, z);
@@ -1495,7 +1528,8 @@ renderMapLegend();
 /* ───────── 연결 점검: 인증키와 외부 서버를 실제로 시험 ───────── */
 function diagVW(path, params, domain) {
   const p = Object.assign({ key: vkey(), format: 'json', errorFormat: 'json' }, params);
-  if (domain !== null) p.domain = domain === undefined ? location.origin : domain;
+  const d = domain === undefined ? VW_DOMS[vwDom] : domain; // 따로 안 정하면 지금 앱이 쓰는 형식
+  if (d) p.domain = d;
   return jsonpRaw('https://api.vworld.kr/req/' + path, p, 8000).then(res => {
     const r = res && res.response;
     if (!r) throw new Error('응답 형식이 이상함');
@@ -1531,7 +1565,7 @@ async function runDiag() {
     const ua = navigator.userAgent;
     const where = /KAKAOTALK/i.test(ua) ? '카카오톡 안 브라우저' : /NAVER\(inapp/i.test(ua) ? '네이버 앱 안 브라우저' : window.NFZApp ? '안드로이드 앱' : /SamsungBrowser/i.test(ua) ? '삼성 인터넷' : /Chrome/i.test(ua) ? '크롬' : /Safari/i.test(ua) ? '사파리' : '기타 브라우저';
     const inApp = /KAKAOTALK|NAVER\(inapp|Instagram|FBAN|FBAV|Line\//i.test(ua);
-    add(inApp ? 'warn' : true, '사용 환경', `${where} · ${($('.appbar .badge') || {}).textContent || ''} · 주소 ${location.origin}${location.pathname}` + (inApp ? ' — 메신저 안 브라우저는 브이월드가 인증키를 거부하기도 해요. 삼성 인터넷·크롬·앱에서 열어 보세요.' : ''));
+    add(inApp ? 'warn' : true, '사용 환경', `${where} · ${($('.appbar .badge') || {}).textContent || ''} · 주소 ${location.origin}${location.pathname}` + (inApp ? ' — 메신저 안 브라우저에서 문제가 계속되면 삼성 인터넷·크롬·앱에서 열어 보세요.' : ''));
     // 2) 인증키 형식
     const key = vkey();
     const keyOk = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i.test(key);
@@ -1558,11 +1592,18 @@ async function runDiag() {
     let okN = 0; const errs = new Set(); const t0 = Date.now();
     for (let i = 0; i < 5; i++) { try { await diagVW('data', dataParams('LT_C_AISPRHC')); okN++; } catch (e) { errs.add(e.message); } }
     add(okN === 5 ? true : okN ? 'warn' : false, '반복 요청 안정성 (비행금지구역 5회)', `${okN}/5 성공${errs.size ? ' · 실패 원인: ' + [...errs].join(' / ') : ''}`, Date.now() - t0);
-    // 5) domain 값 형식별로 인증키가 받아들여지는지
-    const variants = [['지금 방식', location.origin], ['경로 포함', location.origin + '/nfz/'], ['주소만', location.host], ['domain 없음', null]];
-    const vr = [];
-    for (const [nm, d] of variants) { try { await diagVW('data', dataParams('LT_C_AISUAC'), d); vr.push(`${nm} ✅`); } catch (e) { vr.push(`${nm} ❌(${e.message})`); } }
-    add(vr[0].includes('✅') ? true : false, '인증키 도메인 확인', vr.join(' · '));
+    // 5) domain 값 형식별로 인증키가 받아들여지는지 (형식마다 3번)
+    const names = { base: '경로 포함', none: 'domain 없음', origin: '주소만(예전 방식)' };
+    const vr = [], score = {};
+    for (const d of VW_ORDER) {
+      let n = 0, why = '';
+      for (let i = 0; i < 3; i++) { try { await diagVW('data', dataParams('LT_C_AISUAC'), VW_DOMS[d]); n++; } catch (e) { why = e.message; } }
+      score[d] = n;
+      vr.push(`${names[d]} ${n}/3${d === vwDom ? '(사용 중)' : ''}${n < 3 && why ? ` — ${why}` : ''}`);
+    }
+    add(score[vwDom] === 3 ? true : score[vwDom] ? 'warn' : false, '인증키 도메인 확인', vr.join(' · ') + ` · 등록 주소는 ${PAGE_BASE.replace(/^https?:\/\//, '').replace(/\/$/, '')} 여야 해요`);
+    const best = VW_ORDER.reduce((a, b) => (score[b] > score[a] ? b : a), vwDom);
+    if (score[best] > score[vwDom]) { setVwDom(best); add(true, '형식 자동 변경', `앞으로 '${names[best]}' 형식으로 보냅니다`); }
     // 6) 주소·검색 API
     await step('주소 찾기 (좌표→주소)', () => diagVW('address', { service: 'address', request: 'getAddress', version: '2.0', crs: 'epsg:4326', point: `${lon},${lat}`, type: 'both' }),
       r => { const x = r.result && r.result[0]; return [true, x ? x.text : '정상 (주소 없음)']; });
@@ -1572,9 +1613,9 @@ async function runDiag() {
     await step('배경지도 그림', () => diagImg(`https://api.vworld.kr/req/wmts/1.0.0/${key}/Base/7/49/109.png`));
     const m = (x, y) => [x * 20037508.34 / 180, Math.log(Math.tan((90 + y) * Math.PI / 360)) * 20037508.34 / Math.PI];
     const [x1, y1] = m(126.9, 37.5), [x2, y2] = m(127.05, 37.65);
-    await step('공역 지도 그림 (비행금지구역)', () => diagImg('https://api.vworld.kr/req/wms?' + new URLSearchParams({
+    await step('공역 지도 그림 (비행금지구역)', () => diagImg('https://api.vworld.kr/req/wms?' + new URLSearchParams(Object.assign({
       service: 'WMS', request: 'GetMap', version: '1.3.0', layers: 'lt_c_aisprhc', styles: 'lt_c_aisprhc', crs: 'EPSG:3857',
-      bbox: [x1, y1, x2, y2].map(v => v.toFixed(1)).join(','), width: '256', height: '256', format: 'image/png', transparent: 'true', key, domain: location.origin })));
+      bbox: [x1, y1, x2, y2].map(v => v.toFixed(1)).join(','), width: '256', height: '256', format: 'image/png', transparent: 'true', key }, VW_DOMS[vwDom] ? { domain: VW_DOMS[vwDom] } : {}))));
     // 8) 날씨·지자기·항공고시보
     await step('날씨 (Open-Meteo)', async () => { const r = await fetchT(`https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}&current=wind_speed_10m&wind_speed_unit=ms`, {}, 12000); if (!r.ok) throw new Error('HTTP ' + r.status); const j = await r.json(); return j.current; },
       c => [true, `정상 (풍속 ${c.wind_speed_10m}m/s)`]);
