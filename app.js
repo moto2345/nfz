@@ -440,6 +440,7 @@ async function fetchWeather(lat, lon) {
   if (!r.ok) throw new Error('날씨 오류');
   const w = await r.json();
   w.kp = kp;
+  if (kp) updateKpBadge(kp);
   return w;
 }
 // 지자기 Kp 지수 (미국 해양대기청 우주기상센터) — 지구 전체 값, 10분간 재사용
@@ -469,6 +470,26 @@ async function fetchKp() {
   return v;
 }
 const kpLevel = k => k >= 5 ? { cls: 'kp-bad', txt: '폭풍' } : k >= 4 ? { cls: 'kp-mid', txt: '약간 불안정' } : { cls: 'kp-ok', txt: '안정' };
+// 지도 왼쪽 아래 Kp 표시 — 앱을 열면 바로 받아오고 10분마다 새로
+let kpShown = null;
+function updateKpBadge(v) {
+  const el = $('#kpBadge'); if (!el) return;
+  if (!v) return; // 못 받아오면 이전 값 유지(처음이면 숨김)
+  kpShown = v;
+  const lv = kpLevel(v.now);
+  el.className = 'kp-badge ' + lv.cls;
+  $('#kpVal').textContent = 'Kp ' + v.now;
+}
+function refreshKp() { if (!document.hidden) fetchKp().then(updateKpBadge).catch(() => {}); }
+refreshKp();
+setInterval(refreshKp, 600e3);
+$('#kpBadge').addEventListener('click', () => {
+  if (!kpShown) return;
+  const k = kpShown.now, m = kpShown.max6;
+  const what = k >= 5 ? '지자기 폭풍 — GPS·나침반이 불안정할 수 있어요. 수동(ATTI) 조종에 자신 없으면 비행을 미루세요.'
+    : k >= 4 ? '약간 불안정 — GPS 위성 수와 홈포인트를 꼭 확인하세요.' : '안정 — GPS·나침반 영향이 거의 없어요.';
+  toast(`지자기 Kp ${k} · ${what}${m != null && m >= 5 && k < 5 ? ` (6시간 안에 최대 Kp ${m} 예보)` : ''} (0~3 안정 · 4 주의 · 5 이상 폭풍)`, 6000);
+});
 // 기체별 최대 내풍 성능(제조사 공식 사양, m/s) — 강풍 판정 기준
 const DRONES = [
   { id: 'std', name: '기체 선택 안 함 (250g급 기준)', wind: 10.7 },
