@@ -174,13 +174,15 @@ async function analyze(lat, lon) {
       }
     }
   });
-  // 항공고시보(NOTAM): 진행 중인 구역 안이면 비행 불가, 곧 시작하면 주의로 안내
+  // 항공고시보(NOTAM): 지금 활성인 구역 안이면 종류별 판정, 시간제 비활성·예정이면 주의로 안내
   await Promise.race([notamReady, new Promise(r => setTimeout(r, 4000))]);
+  const soonLimit = Date.now() + 864e5;
   for (const it of notamList()) {
     if (!it.geometry) continue;
     const st = notamStatus(it);
-    const zone = st === 'active' ? NOTAM_ZONE : NOTAM_SOON_ZONE;
-    const item = { zone, feature: notamFeature(it), label: `${it.no} · ${notamPeriod(it)}`, notam: it };
+    if (st === 'upcoming' && Date.parse(it.start) > soonLimit) continue; // 하루 넘게 남은 예정은 판정에서 제외
+    const zone = notamZone(it, st);
+    const item = { zone, feature: notamFeature(it), label: `${it.no} · ${notamPeriod(it)}`, notam: it, notamSt: st };
     if (containsPoint(it.geometry, lon, lat)) { item.dist = 0; (st === 'active' ? inside : nearby).push(item); }
     else { item.dist = distToBoundary(it.geometry, lon, lat); if (item.dist <= CFG.CHECK_RADIUS_M) nearby.push(item); }
   }
@@ -210,15 +212,17 @@ function makeVerdict(inside, nearby, failed) {
     const names = critical.map(f => f.zone.name).join(', ');
     return { cls: 'v-gray', ico: '⚠️', title: '확인 불완전 — 다시 확인 필요', desc: `${names} 데이터를 불러오지 못해 비행 가능 여부를 확정할 수 없습니다. 잠시 후 ⟳ 새로고침으로 다시 확인하세요.`, code: 'partial' };
   }
+  // 이 지점이 시간제(지금 비활성)·곧 시작될 항공고시보 구역 안이면 따로 알림
+  const soon = nearby.find(x => x.notam && x.dist === 0);
+  const soonNote = !soon ? '' : soon.notamSt === 'standby'
+    ? `이 지점은 시간제 ${notamKind(soon.notam).name}(항공고시보 ${soon.notam.no}) 안이에요. 지금은 비활성이지만 활성 시간(${scheduleText(soon.notam)})에는 비행하면 안 됩니다.`
+    : `이 지점은 ${notamPeriod(soon.notam)} ${notamKind(soon.notam).name}(항공고시보 ${soon.notam.no}) 예정입니다.`;
   if (top === 1) {
     const names = [...new Set(inside.filter(x => x.zone.level === 1).map(x => x.zone.name))].join(', ');
     const park = has('LT_C_WGISNPGUG') ? ' 국립공원 안에서는 공원사무소 허가가 필요합니다.' : '';
-    return { cls: 'v-yellow', ico: '🟡', title: '주의 — 확인 후 비행', desc: `${names} 안입니다.${park} 비행 전 드론 원스톱에서 확인하세요.`, code: 'caution' };
+    return { cls: 'v-yellow', ico: '🟡', title: '주의 — 확인 후 비행', desc: `${names} 안입니다.${park} 비행 전 드론 원스톱에서 확인하세요.` + (soonNote ? ' ⚠️ ' + soonNote : ''), code: 'caution', nearNote: soonNote };
   }
   const base = has('LT_C_AISUAC') ? '초경량비행장치 공역입니다.' : '확인된 비행금지·제한 공역이 없습니다.';
-  // 이 지점이 곧 시작될 항공고시보 구역 안이면 따로 알림
-  const soon = nearby.find(x => x.notam && x.dist === 0);
-  const soonNote = soon ? `이 지점은 ${notamPeriod(soon.notam)} 임시비행금지(항공고시보 ${soon.notam.no}) 예정입니다.` : '';
   const near1 = nearby.find(x => !(x.notam && x.dist === 0));
   const nearTxt = near1 && near1.dist < 1000 ? `${fmtDist(near1.dist)} 옆에 ${near1.zone.name}이 있습니다.` : '';
   const warn = ' 조종자 준수사항(주간·25kg 이하·150m 미만·가시권)을 지키면 비행할 수 있습니다.' + (nearTxt ? ` 단, ${nearTxt.replace('있습니다.', '있으니 넘어가지 않게 주의하세요.')}` : '') + (soonNote ? ' ⚠️ ' + soonNote : '');
@@ -475,6 +479,7 @@ async function checkAt(lat, lon, label) {
   lastResult = res;
   renderResult(res);
   drawZones(res);
+  if (notamData) { updateNotamButton(); autoOpenNotams(); }
 
   fetchWeather(lat, lon).then(w => {
     if (seq !== checkSeq) return;
@@ -536,7 +541,7 @@ function renderResult(r) {
   if (near.length) h += `<div class="section-title">반경 ${fmtDist(CFG.CHECK_RADIUS_M)} 내 주의 공역</div>` + near.map(x => zoneRow(x, true)).join('');
   if (r.failed.length && r.verdict.code !== 'error') h += `<p class="muted small">일부 데이터 조회 실패: ${r.failed.map(f => f.zone.name).join(', ')}</p>`;
   h += `<div id="wxBox"><div class="hint"><span class="spinner"></span>날씨 확인 중…</div></div>
-    <p class="muted small" style="margin-top:12px">※ 참고용입니다. 임시 비행금지 등은 반영되지 않을 수 있으니 비행 전 드론 원스톱에서 최종 확인하세요.</p>`;
+    <p class="muted small" style="margin-top:12px">※ 참고용입니다. 항공고시보(임시 구역)는 드론 관련만 30분 간격으로 반영돼 늦을 수 있으니 비행 전 드론 원스톱에서 최종 확인하세요.</p>`;
   sheetHtml(h);
   $('#btnFav').onclick = () => addFavorite(r);
   $('#btnLogHere').onclick = () => openLogForm({ fromResult: r });
@@ -898,27 +903,152 @@ renderChecks();
 
 /* ───────── 항공고시보(NOTAM) — 드론 관련만 ───────── */
 // GitHub 자동 작업이 30분마다 국토부 xNOTAM에서 가져와 notam.json으로 저장해 둔 것을 읽음
-const NOTAM_URLS = ['https://raw.githubusercontent.com/moto2345/nfz/main/notam.json', 'notam.json'];
-const NOTAM_ZONE = { id: 'NOTAM', name: '임시비행금지(항공고시보)', level: 3, color: '#c62828', pat: 'hatch', note: '항공고시보(NOTAM)로 지정된 임시 구역' };
-const NOTAM_SOON_ZONE = { id: 'NOTAM', name: '임시비행금지 예정(항공고시보)', level: 1, color: '#ef6c00', pat: 'hatch', note: '곧 시작되는 항공고시보 구역' };
-let notamData = null, notamLayer = null;
+const NOTAM_URLS = ['https://raw.githubusercontent.com/moto2345/nfz-android/main/notam.json'];
+const NEAR_KM = 40;   // 알림창은 기준 위치에서 이 거리 안의 것만
+const NOTAM_KIND = {  // 종류별 판정 등급
+  P: { name: '임시비행금지구역', level: 3 },
+  R: { name: '임시비행제한구역', level: 3 },
+  D: { name: '임시위험구역', level: 2 },
+  U: { name: '드론 활동 구역', level: 2 }
+};
+const NOTAM_ZONE = { id: 'NOTAM', name: '항공고시보 구역', level: 3, color: '#c62828', pat: 'hatch', note: '항공고시보(NOTAM)로 지정된 임시 구역' };
+function notamZone(it, st) {
+  const k = notamKind(it);
+  if (st === 'active') return Object.assign({}, NOTAM_ZONE, { name: `${k.name}(항공고시보)`, level: k.level });
+  const tail = st === 'standby' ? '지금은 비활성 · 시간제' : '예정';
+  return Object.assign({}, NOTAM_ZONE, { name: `${k.name}(항공고시보 · ${tail})`, level: 1, color: '#ef6c00' });
+}
+let notamData = null, notamLayer = null, notamShowAll = false;
 const kst = iso => new Date(Date.parse(iso) + 9 * 3600e3);
 const fmtKST = iso => { const k = kst(iso); return `${k.getUTCMonth() + 1}/${k.getUTCDate()} ${pad(k.getUTCHours())}:${pad(k.getUTCMinutes())}`; };
 const todayKST = () => kst(new Date().toISOString()).toISOString().slice(0, 10);
+
+// D)항목(시간대, UTC)을 해석해서 지금 활성인지 판단: 'on' | 'off' | 'unknown'
+// 예) "2300-0900", "SEP 12-14 16 20-30 0000-0900, OCT 01-18 0000-0900", "16-20 0910-1204 1835-2119, 21-24 1835-2119"
+const MONTHS = { JAN: 1, FEB: 2, MAR: 3, APR: 4, MAY: 5, JUN: 6, JUL: 7, AUG: 8, SEP: 9, OCT: 10, NOV: 11, DEC: 12 };
+// 해석 결과: 'always'(시간 제한 없음) | null(해석 불가) | [{days:[[월,일]…]|null, times:[[시작분,끝분]…]}] (UTC)
+function parseSchedule(it) {
+  if (it._sch === undefined) Object.defineProperty(it, '_sch', { value: parseScheduleRaw(it), enumerable: false });
+  return it._sch;
+}
+function parseScheduleRaw(it) {
+  const s = (it.schedule || '').toUpperCase().replace(/\s+/g, ' ').trim();
+  if (!s) return 'always';
+  const now = new Date();
+  let month = it.start ? new Date(it.start).getUTCMonth() + 1 : now.getUTCMonth() + 1, lastDay = 0;
+  const wins = [];
+  let days = [], times = [];
+  const flush = () => {
+    if (days.length || times.length) wins.push({ days: days.length ? days : null, times: times.length ? times : [[0, 1440]] });
+    days = []; times = [];
+  };
+  const pushDays = (a, b) => {
+    if (a < 1 || a > 31 || b < 1 || b > 31) return false;
+    if (a < lastDay) month = month % 12 + 1;        // 날짜가 줄어들면 다음 달로 넘어간 것
+    if (b < a) { for (let d = a; d <= 31; d++) days.push([month, d]); month = month % 12 + 1; a = 1; }
+    for (let d = a; d <= b; d++) days.push([month, d]);
+    lastDay = b; return true;
+  };
+  const toks = s.replace(/,/g, ' , ').split(' ').filter(Boolean);
+  for (let i = 0; i < toks.length; i++) {
+    const t = toks[i];
+    let m;
+    if (t === ',') flush();
+    else if ((m = t.match(/^(\d{2})(\d{2})-(\d{2})$/)) && /^\d{4}$/.test(toks[i + 1] || '')) {
+      // "27 2300-28 0300" 처럼 날짜를 넘겨 이어지는 시간대
+      if (days.length !== 1 || times.length) return null;
+      const [sm, sd] = days[0], ed = +m[3], n = toks[++i];
+      const em = ed < sd ? sm % 12 + 1 : sm;
+      wins.push({ days: [[sm, sd]], times: [[+m[1] * 60 + +m[2], 1440]] });
+      const mid = [];
+      for (let mm = sm, dd = sd + 1; !(mm === em && dd >= ed); dd++) { if (dd > 31) { mm = mm % 12 + 1; dd = 0; continue; } mid.push([mm, dd]); }
+      if (mid.length) wins.push({ days: mid, times: [[0, 1440]] });
+      wins.push({ days: [[em, ed]], times: [[0, +n.slice(0, 2) * 60 + +n.slice(2)]] });
+      days = []; month = em; lastDay = ed;
+    }
+    else if (MONTHS[t]) { if (times.length) flush(); month = MONTHS[t]; lastDay = 0; }
+    else if ((m = t.match(/^(\d{2})(\d{2})-(\d{2})(\d{2})$/))) times.push([+m[1] * 60 + +m[2], +m[3] * 60 + +m[4]]);
+    else if ((m = t.match(/^(\d{2})(?:-(\d{2}))?$/))) {
+      if (times.length) flush();                     // 시간 뒤에 날짜가 오면 새 묶음
+      if (!pushDays(+m[1], m[2] ? +m[2] : +m[1])) return null;
+    }
+    else if (t === 'DAILY') { /* 매일 */ }
+    else return null; // SR-SS, MON-FRI, EXC, H24 등 → 해석 불가 → 안전하게 '활성'으로 취급
+  }
+  flush();
+  return wins.length ? wins : null;
+}
+const schedHasDay = (w, m, d) => !w.days || w.days.some(x => x[0] === m && x[1] === d);
+function schedOn(wins, now) {
+  const cm = now.getUTCMonth() + 1, cd = now.getUTCDate(), cur = now.getUTCHours() * 60 + now.getUTCMinutes();
+  const y = new Date(now.getTime() - 864e5), ym = y.getUTCMonth() + 1, yd = y.getUTCDate();
+  for (const w of wins) for (const [a, b] of w.times) {
+    if (b > a) { if (schedHasDay(w, cm, cd) && cur >= a && cur < b) return true; }
+    else { // 자정을 넘기는 시간대
+      if (schedHasDay(w, cm, cd) && cur >= a) return true;
+      if (schedHasDay(w, ym, yd) && cur < b) return true;
+    }
+  }
+  return false;
+}
+function scheduleState(it, now = new Date()) {
+  const w = parseSchedule(it);
+  return w === 'always' ? 'on' : !w ? 'unknown' : schedOn(w, now) ? 'on' : 'off';
+}
+// 한국시간 하루(dayStart = 그날 0시의 UTC ms) 중 활성 시간대 → [[시작분, 끝분], …] (한국시간 기준 분)
+function kstDayWindows(it, dayStart) {
+  const w = parseSchedule(it), dayEnd = dayStart + 864e5;
+  const lo = Math.max(dayStart, it.start ? Date.parse(it.start) : -Infinity), hi = Math.min(dayEnd, it.end ? Date.parse(it.end) : Infinity);
+  if (hi <= lo) return [];
+  const iv = [];
+  if (w === 'always' || !w) iv.push([lo, hi]);
+  else for (let u = dayStart - 2 * 864e5; u <= dayEnd; u += 864e5) { // 겹칠 수 있는 UTC 날짜들
+    const ud = new Date(u), base = Date.UTC(ud.getUTCFullYear(), ud.getUTCMonth(), ud.getUTCDate());
+    const m = ud.getUTCMonth() + 1, d = ud.getUTCDate();
+    for (const x of w) if (schedHasDay(x, m, d)) for (const [a, b] of x.times) {
+      const s0 = Math.max(lo, base + a * 6e4), e0 = Math.min(hi, base + (b > a ? b : b + 1440) * 6e4);
+      if (e0 > s0) iv.push([s0, e0]);
+    }
+  }
+  iv.sort((p, q) => p[0] - q[0]);
+  const out = [];
+  for (const [a, b] of iv) { const l = out[out.length - 1]; if (l && a <= l[1]) l[1] = Math.max(l[1], b); else out.push([a, b]); }
+  return out.map(([a, b]) => [Math.round((a - dayStart) / 6e4), Math.round((b - dayStart) / 6e4)]);
+}
+// 사람이 읽기 쉬운 앞으로의 활성 시간 (한국시간): "9/25(오늘) 09:00~12:00, 13:00~18:00 · 9/26(내일) 종일"
+function scheduleText(it) {
+  const w = parseSchedule(it);
+  if (w === 'always') return '';
+  if (!w) return `원문(UTC) ${it.schedule}`;
+  const k = kst(new Date().toISOString());
+  const day0 = Date.UTC(k.getUTCFullYear(), k.getUTCMonth(), k.getUTCDate()) - 9 * 3600e3;
+  const last = Math.min(it.end ? Date.parse(it.end) : Infinity, day0 + 31 * 864e5);
+  const hm = m => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
+  const parts = []; let more = false;
+  const nowMin = Math.floor((Date.now() - day0) / 6e4);
+  for (let d = day0; d < last; d += 864e5) {
+    const ws = kstDayWindows(it, d).filter(([, b]) => d !== day0 || b > nowMin); // 오늘 이미 지난 시간대는 빼기
+    if (!ws.length) continue;
+    if (parts.length === 2) { more = true; break; }
+    const kd = new Date(d + 9 * 3600e3);
+    const label = `${kd.getUTCMonth() + 1}/${kd.getUTCDate()}` + (d === day0 ? '(오늘)' : d === day0 + 864e5 ? '(내일)' : '');
+    parts.push(label + ' ' + ws.map(([a, b]) => a === 0 && b === 1440 ? '종일' : `${hm(a)}~${hm(b)}`).join(', '));
+  }
+  return parts.length ? parts.join(' · ') + (more ? ' …' : '') : '남은 활성 시간 없음';
+}
 function notamStatus(it, now = Date.now()) {
   const s = it.start ? Date.parse(it.start) : 0, e = it.end ? Date.parse(it.end) : Infinity;
-  return now < s ? 'upcoming' : now > e ? 'ended' : 'active';
+  if (now < s) return 'upcoming';
+  if (now > e) return 'ended';
+  return scheduleState(it, new Date(now)) === 'off' ? 'standby' : 'active';
 }
-function notamList() { return ((notamData && notamData.items) || []).filter(it => notamStatus(it) !== 'ended'); }
+const QKIND = { QRP: 'P', QRR: 'R', QRT: 'R', QRD: 'D', QWU: 'U' };
+const notamKind = it => NOTAM_KIND[it.kind || QKIND[(it.qcode || '').slice(0, 3)]] || NOTAM_KIND.R;
+// 취소·대체 안내문(영역 없음)은 제외 — 수집 스크립트에서도 거르지만 한 번 더
+const notamValid = it => !/(CN|XX)$/.test(it.qcode || '') && !/NOTAM\s+CNL|NEW NOTAM TO FLW/i.test(it.text || '');
+function notamList() { return ((notamData && notamData.items) || []).filter(it => notamValid(it) && notamStatus(it) !== 'ended'); }
 function notamPeriod(it) {
   return `${it.start ? fmtKST(it.start) : '지금'} ~ ${it.end ? fmtKST(it.end) + (it.endEst ? '(예상)' : '') : '별도 공지 시까지'}`;
-}
-// D)항목의 시간(UTC)을 한국시간으로 (예: 0900-2200 → 18:00-07:00)
-function scheduleKST(s) {
-  if (!s) return '';
-  const t = (h, mi) => `${pad((+h + 9) % 24)}:${mi}`;
-  const out = s.replace(/\b([01]\d|2[0-3])([0-5]\d)\s*-\s*([01]\d|2[0-4])([0-5]\d)\b/g, (m, h1, m1, h2, m2) => `${t(h1, m1)}-${t(h2, m2)}`);
-  return out === s ? s : out + ' (한국시간)';
 }
 function notamAlt(it) {
   if (it.fromTxt || it.toTxt) return `${it.fromTxt || 'SFC'} ~ ${it.toTxt || ''}`.trim();
@@ -926,26 +1056,35 @@ function notamAlt(it) {
 }
 function notamFeature(it) {
   return { type: 'Feature', geometry: it.geometry, properties: {
-    번호: it.no, 기간: notamPeriod(it), 시간대: scheduleKST(it.schedule), 고도: notamAlt(it), 내용: it.text } };
+    번호: it.no, 기간: notamPeriod(it), 활성시간: scheduleText(it), 고도: notamAlt(it), 내용: it.text } };
 }
 async function loadNotams() {
   for (const u of NOTAM_URLS) {
     try {
-      const r = await fetch(u + (u.includes('?') ? '&' : '?') + 't=' + Date.now(), { cache: 'no-store' });
+      const r = await fetch(u + '?t=' + Date.now(), { cache: 'no-store' });
       if (r.ok) { const d = await r.json(); if (d && Array.isArray(d.items)) { notamData = d; break; } }
     } catch (e) {}
   }
   if (!notamData) return;
   drawNotams();
   updateNotamButton();
-  if (LS.get('notamHide', '') !== todayKST() && notamList().length) openNotamModal();
+  if (lastResult) autoOpenNotams();
+  else setTimeout(autoOpenNotams, 8000); // 위치를 못 잡는 경우엔 지도 중심 기준으로
+}
+// 앱을 연 뒤 첫 판정(내 위치 등)이 나오면 그 주변 기준으로 한 번만 자동 알림
+let notamAutoDone = false;
+function autoOpenNotams() {
+  if (!notamData || notamAutoDone) return;
+  notamAutoDone = true;
+  if (LS.get('notamHide', '') === todayKST()) return;
+  if (nearbyNotams().length && $('#notamModal').classList.contains('hidden')) openNotamModal();
 }
 function drawNotams() {
   if (!layerCtl) return;
   if (!notamLayer) {
     notamLayer = L.layerGroup();
     overlayZone.set(notamLayer, NOTAM_ZONE);
-    layerCtl.addOverlay(notamLayer, `${swatch(NOTAM_ZONE)} 항공고시보(임시비행금지)`);
+    layerCtl.addOverlay(notamLayer, `${swatch(NOTAM_ZONE)} 항공고시보(임시 구역)`);
     const saved = LS.get('layerOn', {});
     if (saved.NOTAM === false) hiddenZones.add('NOTAM');
     else { quietToggle = true; notamLayer.addTo(map); quietToggle = false; }
@@ -956,42 +1095,58 @@ function drawNotams() {
     const on = notamStatus(it) === 'active';
     L.geoJSON(it.geometry, { interactive: false, style: {
       color: on ? '#c62828' : '#ef6c00', weight: 2, dashArray: on ? '5 4' : '2 6',
-      fillColor: on ? '#e53935' : '#ef6c00', fillOpacity: on ? 0.16 : 0.06 } }).addTo(notamLayer);
+      fillColor: on ? '#e53935' : '#ef6c00', fillOpacity: on ? 0.14 : 0.05 } }).addTo(notamLayer);
   }
 }
-function updateNotamButton() {
-  const list = notamList(), btn = $('#btnNotam');
-  if (!btn) return;
-  btn.classList.toggle('hidden', !list.length);
-  const act = list.filter(it => notamStatus(it) === 'active').length;
-  $('#notamCount').textContent = list.length;
-  btn.classList.toggle('has-active', act > 0);
-}
 function refPoint() {
-  if (meMarker) { const p = meMarker.getLatLng(); return [p.lat, p.lng]; }
   if (lastResult) return [lastResult.lat, lastResult.lon];
+  if (meMarker) { const p = meMarker.getLatLng(); return [p.lat, p.lng]; }
   const c = map.getCenter(); return [c.lat, c.lng];
 }
-function openNotamModal() {
-  const list = notamList();
-  const [rl, ro] = refPoint();
-  const dist = it => it.geometry ? (containsPoint(it.geometry, ro, rl) ? 0 : distToBoundary(it.geometry, ro, rl)) : Infinity;
-  const rows = list.map(it => ({ it, st: notamStatus(it), d: dist(it) }))
+function refName() {
+  if (lastResult) return lastResult.label === '내 위치' ? '내 위치' : '확인한 지점';
+  return meMarker ? '내 위치' : '지도 중심';
+}
+function notamRows(all) {
+  const [rl, ro] = refPoint(), soon = Date.now() + 864e5;
+  return notamList().map(it => ({
+    it, st: notamStatus(it),
+    d: it.geometry ? (containsPoint(it.geometry, ro, rl) ? 0 : distToBoundary(it.geometry, ro, rl)) : Infinity
+  })).filter(r => all || (r.d <= NEAR_KM * 1000 && (r.st !== 'upcoming' || Date.parse(r.it.start) < soon)))
     .sort((a, b) => (a.st === 'active' ? 0 : 1) - (b.st === 'active' ? 0 : 1) || a.d - b.d);
-  const act = rows.filter(r => r.st === 'active').length;
+}
+function nearbyNotams() { return notamRows(false); }
+function updateNotamButton() {
+  const btn = $('#btnNotam'); if (!btn || !notamData) return;
+  const near = nearbyNotams();
+  btn.classList.remove('hidden');
+  $('#notamCount').textContent = near.length;
+  $('#notamCount').classList.toggle('hidden', !near.length);
+  btn.classList.toggle('has-active', near.some(r => r.st === 'active'));
+}
+function openNotamModal() {
+  const rows = notamRows(notamShowAll).slice(0, notamShowAll ? 200 : 100);
+  const all = notamList().length, act = rows.filter(r => r.st === 'active').length;
   const age = notamData.fetchedAtUTC ? (Date.now() - Date.parse(notamData.fetchedAtUTC)) / 3600e3 : 99;
-  $('#notamSummary').innerHTML = `전국 드론 관련 · 진행 중 <b>${act}</b>건 · 예정 <b>${rows.length - act}</b>건<br>`
-    + `<span class="muted">확인 시각 ${notamData.fetchedAt ? fmtKST(notamData.fetchedAtUTC) : '-'}${age > 8 ? ' · ⚠️ 최신이 아닐 수 있어요' : ''}</span>`;
+  $('#notamSummary').innerHTML = (notamShowAll
+      ? `전국 드론 관련 <b>${all}</b>건 (가까운 순)`
+      : `${refName()}에서 ${NEAR_KM}km 안 · 지금 활성 <b>${act}</b>건 · 시간제·예정 <b>${rows.length - act}</b>건`)
+    + ` <button type="button" class="linkbtn" id="notamScope">${notamShowAll ? '내 주변만 보기' : `전국 ${all}건 보기`}</button><br>`
+    + `<span class="muted">확인 시각 ${notamData.fetchedAtUTC ? fmtKST(notamData.fetchedAtUTC) : '-'}${age > 8 ? ' · ⚠️ 최신이 아닐 수 있어요' : ''}</span>`;
+  const badge = st => st === 'active' ? '<span class="tag" style="background:#c62828">지금 활성</span>'
+    : st === 'standby' ? '<span class="tag" style="background:#ef6c00">시간제 · 지금 비활성</span>'
+    : '<span class="tag" style="background:#ef6c00">예정</span>';
   $('#notamList').innerHTML = rows.map((r, i) => {
-    const it = r.it, badge = r.st === 'active' ? '<span class="tag" style="background:#c62828">진행 중</span>' : '<span class="tag" style="background:#ef6c00">예정</span>';
-    const where = !it.geometry ? '영역 정보 없음' : r.d === 0 ? '📍 현재 기준 위치가 이 구역 안' : `기준 위치에서 ${fmtDist(r.d)}`;
-    return `<div class="notam-item">
-      <div class="log-top"><b>${esc(it.no)} ${it.category === 'drone' ? '드론' : '임시제한'}</b>${badge}</div>
-      <div class="meta">🕘 ${esc(notamPeriod(it))}${it.schedule ? '<br>⏱ ' + esc(scheduleKST(it.schedule)) : ''}<br>↕ ${esc(notamAlt(it))} · ${esc(where)}</div>
+    const it = r.it, k = notamKind(it);
+    const where = !it.geometry ? '영역 정보 없음' : r.d === 0 ? `📍 ${refName()}가 이 구역 안` : `${refName()}에서 ${fmtDist(r.d)}`;
+    return `<div class="notam-item ${r.st}">
+      <div class="log-top"><b>${esc(k.name)} <span class="muted small">${esc(it.no)}</span></b>${badge(r.st)}</div>
+      <div class="meta">🕘 ${esc(notamPeriod(it))}${it.schedule ? '<br>⏱ 활성 ' + esc(scheduleText(it)) : ''}<br>↕ ${esc(notamAlt(it))} · ${esc(where)}</div>
       <div class="notam-text">${esc(it.text)}</div>
       ${it.geometry ? `<button class="btn sm" data-ni="${i}">🗺 지도에서 보기</button>` : ''}
     </div>`;
-  }).join('') || '<p class="muted">현재 드론 관련 항공고시보가 없습니다.</p>';
+  }).join('') || `<p class="muted">${refName()}에서 ${NEAR_KM}km 안에는 지금·오늘 해당하는 드론 관련 항공고시보가 없어요.</p>`;
+  $('#notamScope').addEventListener('click', () => { notamShowAll = !notamShowAll; openNotamModal(); });
   $$('#notamList [data-ni]').forEach(b => b.addEventListener('click', () => {
     const it = rows[+b.dataset.ni].it;
     closeNotamModal();
@@ -1000,16 +1155,18 @@ function openNotamModal() {
     setViewVisible([it.center[0], it.center[1]], z);
     checkAt(it.center[0], it.center[1], `${it.no} 항공고시보`);
   }));
-  $('#notamHideToday').checked = false;
   $('#notamModal').classList.remove('hidden');
+  $('#notamList').scrollTop = 0;
 }
 function closeNotamModal() {
   if ($('#notamHideToday').checked) LS.set('notamHide', todayKST());
+  $('#notamHideToday').checked = false;
+  notamShowAll = false;
   $('#notamModal').classList.add('hidden');
 }
 $('#btnNotamClose').addEventListener('click', closeNotamModal);
 $('#notamModal').addEventListener('click', e => { if (e.target.id === 'notamModal') closeNotamModal(); });
-$('#btnNotam').addEventListener('click', () => { if (notamData) openNotamModal(); });
+$('#btnNotam').addEventListener('click', () => { if (notamData) { notamShowAll = false; openNotamModal(); } });
 const notamReady = loadNotams();
 
 /* ───────── 새로고침 시 이전 상태 복원 ───────── */
@@ -1046,5 +1203,5 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
 }
 
 // 테스트용 노출
-window.__dz = { containsPoint, distToBoundary, makeVerdict, ZONES, hiddenZones, overlayZone, drawZones, notamStatus, scheduleKST, get notamData() { return notamData; } };
+window.__dz = { containsPoint, distToBoundary, makeVerdict, ZONES, hiddenZones, overlayZone, drawZones, notamStatus, scheduleText, scheduleState, kstDayWindows, get notamData() { return notamData; } };
 })();

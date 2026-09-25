@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="하코 NFZ">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-  <link rel="stylesheet" href="style.css?v=24">
+  <link rel="stylesheet" href="style.css?v=25">
 </head>
 <body>
 
@@ -20,7 +20,7 @@
 <header class="appbar">
   <img src="icons/icon-192.png" alt="" class="appbar-logo">
   <h1>하코 NFZ 조회</h1>
-  <span class="badge">웹버전 v1.24</span>
+  <span class="badge">웹버전 v1.25</span>
   <button id="btnNotam" class="appbar-btn notam hidden" type="button" aria-label="항공고시보" title="드론 관련 항공고시보">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M10 20.5a2.2 2.2 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
     <span id="notamCount" class="cnt">0</span>
@@ -118,7 +118,7 @@
     <b>지도의 구역 표시 (무늬)</b>
     <p class="muted small">지도에 그려지는 무늬는 드론 원스톱 지도와 같은 방식이에요. 지도 오른쪽 위 레이어 버튼에서 구역별로 켜고 끌 수 있고, 선택한 상태는 기억돼요.</p>
     <ul class="legend" id="mapLegend"></ul>
-    <p class="muted small">🔔 <b>항공고시보(NOTAM)</b>: 행사·훈련 등으로 정해지는 임시 비행금지 구역이에요. 드론 관련 항공고시보를 30분마다 자동으로 가져와 빨간 점선 구역으로 표시하고 판정에도 반영해요. 맨 위 🔔 버튼으로 목록을 볼 수 있어요. 늦게 반영될 수 있으니 비행 전 드론 원스톱에서도 확인하세요.</p>
+    <p class="muted small">🔔 <b>항공고시보(NOTAM)</b>: 행사·훈련 등으로 정해지는 임시 비행금지·제한 구역이에요. 드론 관련만 30분마다 자동으로 가져와 <b>지금 활성</b>은 빨간 점선, <b>시간제(지금 비활성)·예정</b>은 주황 점선으로 표시하고 판정에도 반영해요. 앱을 열면 확인한 곳 40km 안의 것을 알려주고, 맨 위 🔔 버튼에서 전국 목록도 볼 수 있어요. 시간은 모두 한국시간이에요. 늦게 반영될 수 있으니 비행 전 드론 원스톱에서도 확인하세요.</p>
   </div>
 
   <div class="card">
@@ -231,7 +231,7 @@
 <div id="toast" class="toast hidden"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="config.js?v=24"></script>
-<script src="app.js?v=24"></script>
+<script src="config.js?v=25"></script>
+<script src="app.js?v=25"></script>
 </body>
 </html>
