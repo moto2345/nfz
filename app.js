@@ -350,9 +350,39 @@ async function fetchWeather(lat, lon) {
     hourly: 'precipitation_probability,precipitation', forecast_hours: '3',
     daily: 'sunrise,sunset', timezone: 'Asia/Seoul', wind_speed_unit: 'ms', forecast_days: '1'
   });
-  const r = await fetch(u); if (!r.ok) throw new Error('날씨 오류');
-  return r.json();
+  const [r, kp] = await Promise.all([fetch(u), fetchKp().catch(() => null)]);
+  if (!r.ok) throw new Error('날씨 오류');
+  const w = await r.json();
+  w.kp = kp;
+  return w;
 }
+// 지자기 Kp 지수 (미국 해양대기청 우주기상센터) — 지구 전체 값, 10분간 재사용
+let kpCache = null;
+async function fetchKp() {
+  if (kpCache && Date.now() - kpCache.t < 600e3) return kpCache.v;
+  const base = 'https://services.swpc.noaa.gov/';
+  const [a, b] = await Promise.all([
+    fetch(base + 'json/planetary_k_index_1m.json').then(r => r.ok ? r.json() : null).catch(() => null),
+    fetch(base + 'products/noaa-planetary-k-index-forecast.json').then(r => r.ok ? r.json() : null).catch(() => null)
+  ]);
+  let now = null, max6 = null;
+  if (Array.isArray(a) && a.length) { const l = a[a.length - 1]; now = +(l.estimated_kp != null ? l.estimated_kp : l.kp_index); }
+  if (Array.isArray(b) && b.length) {
+    // 형식: 객체 배열 {time_tag, kp, observed} (예전 형식: 첫 줄이 머리글인 배열의 배열)
+    const rows = Array.isArray(b[0]) ? b.slice(1).map(x => ({ time_tag: x[0], kp: x[1] })) : b;
+    const t0 = Date.now() - 3 * 3600e3, t1 = Date.now() + 6 * 3600e3;
+    for (const x of rows) {
+      const t = Date.parse(String(x.time_tag).replace(' ', 'T') + (/[Z+]/.test(x.time_tag) ? '' : 'Z'));
+      if (t >= t0 && t <= t1 && isFinite(+x.kp)) max6 = Math.max(max6 == null ? 0 : max6, +x.kp);
+    }
+    if (now == null) { const past = rows.filter(x => Date.parse(String(x.time_tag).replace(' ', 'T') + 'Z') <= Date.now()); if (past.length) now = +past[past.length - 1].kp; }
+  }
+  if (now == null || !isFinite(now)) throw new Error('Kp 없음');
+  const v = { now: Math.round(now * 10) / 10, max6: max6 != null ? Math.round(max6 * 10) / 10 : null };
+  kpCache = { t: Date.now(), v };
+  return v;
+}
+const kpLevel = k => k >= 5 ? { cls: 'kp-bad', txt: '폭풍' } : k >= 4 ? { cls: 'kp-mid', txt: '약간 불안정' } : { cls: 'kp-ok', txt: '안정' };
 // 기체별 최대 내풍 성능(제조사 공식 사양, m/s) — 강풍 판정 기준
 const DRONES = [
   { id: 'std', name: '기체 선택 안 함 (250g급 기준)', wind: 10.7 },
@@ -404,6 +434,12 @@ function weatherHtml(w) {
   if (iss.rain) notes.push('🌧 강수가 있습니다. 방수 기체가 아니면 비행을 피하세요.');
   else if (iss.rainProb >= 40 || iss.rainMm >= 0.3) notes.push(`🌦 3시간 안에 비 올 확률 ${iss.rainProb != null ? iss.rainProb + '%' : '있음'}${iss.rainMm ? ` (예상 ${iss.rainMm}mm)` : ''} — 비행 전 하늘을 꼭 확인하세요.`);
   if (iss.fog) notes.push('🌫 안개로 가시권 확보가 어렵습니다.');
+  if (w.kp) {
+    const k = w.kp.now, m = w.kp.max6;
+    if (k >= 5) notes.push(`🧲 지자기 폭풍(Kp ${k}) — GPS·나침반이 불안정할 수 있어요. 수동(ATTI) 조종에 자신 없으면 비행을 미루세요.`);
+    else if (k >= 4) notes.push(`🧲 지자기가 약간 불안정합니다(Kp ${k}). GPS 위성 수와 홈포인트를 꼭 확인하세요.`);
+    else if (m != null && m >= 5) notes.push(`🧲 몇 시간 안에 지자기 폭풍이 예보돼 있어요(최대 Kp ${m}). 긴 비행은 피하세요.`);
+  }
   if (night) notes.push(`🌙 지금은 야간(일몰 ${sunset} 이후~일출 ${sunrise} 전)이라 특별비행승인 없이는 비행할 수 없습니다.`);
   if (!notes.length) notes.push('👍 비행하기 괜찮은 날씨입니다.');
   return `<div class="section-title">현재 날씨 (${nowHM} 기준)</div>
@@ -411,8 +447,8 @@ function weatherHtml(w) {
       <div><b>${c.wind_speed_10m.toFixed(1)}</b><span>풍속 m/s · ${windDir(c.wind_direction_10m)}</span></div>
       <div><b>${c.wind_gusts_10m.toFixed(1)}</b><span>돌풍 m/s</span></div>
       <div><b>${Math.round(c.temperature_2m)}°</b><span>${WX[c.weather_code] || '날씨'}</span></div>
-      <div><b>${sunrise}</b><span>일출</span></div>
-      <div><b>${sunset}</b><span>일몰</span></div>
+      <div><b>${sunrise}~${sunset}</b><span>일출~일몰</span></div>
+      ${w.kp ? `<div class="${kpLevel(w.kp.now).cls}"><b>Kp ${w.kp.now}</b><span>지자기 ${kpLevel(w.kp.now).txt}</span></div>` : '<div><b>-</b><span>지자기 Kp</span></div>'}
       <div><b>${iss.rainProb != null ? iss.rainProb + '%' : c.precipitation}</b><span>${iss.rainProb != null ? '비 올 확률 (3시간)' : '강수 mm'}</span></div>
     </div>
     <div class="wx-note">${notes.join('<br>')}</div>
