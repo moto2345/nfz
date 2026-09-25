@@ -44,9 +44,8 @@ a{color:var(--primary)}
 .dropdown .item span{font-size:11px;color:var(--muted)}
 .dropdown .head{padding:6px 11px;font-size:11px;color:var(--muted);background:var(--bg)}
 .fab-col{position:absolute;right:10px;bottom:calc(var(--sheet-h,96px) + 11px);z-index:800;display:flex;flex-direction:column;gap:8px;transition:bottom .2s}
-/* 지도 왼쪽 아래 지자기 Kp 표시 (오른쪽 내 위치 버튼과 같은 높이, 결과창 높이를 따라 움직임) */
-.kp-badge{position:absolute;left:10px;bottom:calc(var(--sheet-h,96px) + 11px);z-index:800;transition:bottom .2s;
-  min-width:45px;height:45px;padding:0 6px;border:0;border-radius:23px;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.25);
+/* 지자기 Kp 표시 — 오른쪽 내 위치 버튼 바로 위 (같은 줄이라 결과창 높이를 같이 따라감) */
+.kp-badge{width:45px;height:45px;padding:0 6px;border:0;border-radius:23px;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.25);
   display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.1;cursor:pointer;-webkit-tap-highlight-color:transparent}
 .kp-badge small{font-size:10px;color:var(--muted);font-weight:700}
 .kp-badge b{font-size:15px;font-weight:800;color:var(--green);font-variant-numeric:tabular-nums;white-space:nowrap}
@@ -60,6 +59,9 @@ a{color:var(--primary)}
 .fab.found{color:#1a73e8;background:#e8f0fe}
 @keyframes locate-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.88)}}
 .leaflet-top{top:52px}
+/* 오른쪽 세로줄: 레이어 버튼과 확대·축소 버튼 폭을 맞춤 */
+.leaflet-touch .leaflet-bar a{width:44px;height:40px;line-height:40px;font-size:22px}
+.leaflet-right .leaflet-control-zoom{clear:both}
 
 /* 하단 시트 */
 .sheet{position:absolute;left:0;right:0;bottom:0;z-index:850;background:var(--card);border-radius:14px 14px 0 0;
@@ -117,7 +119,7 @@ a{color:var(--primary)}
 .btn.sm{padding:5px 8px;font-size:11px}
 a.btn{text-decoration:none;color:var(--primary)}
 
-.timer-banner{position:absolute;top:52px;left:54px;right:59px;z-index:890;background:var(--primary);color:#fff;
+.timer-banner{position:absolute;top:52px;left:10px;right:59px;z-index:890;background:var(--primary);color:#fff;
   border-radius:10px;padding:6px 6px 6px 11px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 2px 8px rgba(0,0,0,.2)}
 .timer-banner button{border:0;background:#fff;color:var(--primary);border-radius:6px;padding:6px 10px;font-weight:700}
 

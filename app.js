@@ -583,7 +583,7 @@ function weatherHtml(w) {
 
 /* ───────── 지도 ───────── */
 const map = L.map('map', { zoomControl: false, attributionControl: false }).setView(CFG.DEFAULT_CENTER, CFG.DEFAULT_ZOOM);
-L.control.zoom({ position: 'topleft' }).addTo(map);
+const zoomCtl = L.control.zoom({ position: 'topright' }); // 오른쪽 레이어 버튼 아래
 let baseLayers = {}, overlayLayers = {}, layerCtl;
 
 function buildLayers() {
@@ -603,6 +603,7 @@ function buildLayers() {
   }
   const firstBase = Object.values(baseLayers)[0]; firstBase.addTo(map);
   layerCtl = L.control.layers(baseLayers, {}, { position: 'topright', collapsed: true }).addTo(map);
+  map.removeControl(zoomCtl); zoomCtl.addTo(map); // 레이어 버튼을 다시 만들어도 확대·축소가 늘 그 아래에 오도록
   if (key) for (const z of ZONES) if (!z.optional || verified.has(z.id)) addZoneOverlay(z);
 }
 // 지도 무늬 칸(타일)을 못 받아오면 잠시 뒤 최대 3번 다시 요청 → 빈 네모 칸 방지
@@ -936,10 +937,11 @@ const resultsBox = $('#searchResults');
 // 목록을 왼쪽 확대·축소 버튼과 오른쪽 레이어 버튼 사이에 같은 간격으로 맞춤 (기종마다 버튼 크기가 달라 실제로 재서 계산)
 function fitDropdown() {
   const GAP = 8, sb = $('.searchbar').getBoundingClientRect();
-  const zoom = document.querySelector('.leaflet-control-zoom'), layers = document.querySelector('.leaflet-control-layers');
-  let ml = 50, mr = 50;
-  if (zoom) ml = Math.max(0, zoom.getBoundingClientRect().right + GAP - sb.left);
-  if (layers) mr = Math.max(0, sb.right - (layers.getBoundingClientRect().left - GAP));
+  // 지도 버튼(레이어·확대축소)이 모두 오른쪽에 있으니 그 왼쪽 끝을 피하고, 좌우 여백은 같게
+  const btns = ['.leaflet-control-layers', '.leaflet-control-zoom'].map(s => document.querySelector(s)).filter(Boolean);
+  let mr = 50;
+  if (btns.length) mr = Math.max(0, sb.right - (Math.min(...btns.map(b => b.getBoundingClientRect().left)) - GAP));
+  let ml = mr;
   if (sb.width - ml - mr < 180) { ml = mr = 0; } // 화면이 너무 좁으면 전체 폭 사용
   resultsBox.style.marginLeft = ml + 'px'; resultsBox.style.marginRight = mr + 'px';
 }
