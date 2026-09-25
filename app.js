@@ -249,11 +249,11 @@ function makeVerdict(inside, nearby, failed) {
   }
   if (top === 3) {
     const names = [...new Set(inside.filter(x => x.zone.level === 3).map(x => x.zone.name))].join(', ');
-    return { cls: 'v-red', ico: '⛔', title: '비행 불가 (승인 필요)', desc: `${names} 안입니다. 드론 원스톱에서 비행승인을 받아야 합니다. (승인 없이 비행 시 과태료 150만원, 1차 위반 기준)`, code: 'no' };
+    return { cls: 'v-red', ico: '⛔', title: '비행 불가 (승인 필요)', desc: `${names} 안입니다. 드론 원스톱에서 비행승인을 받아야 합니다.`, code: 'no' };
   }
   if (top === 2) {
     const names = [...new Set(inside.filter(x => x.zone.level === 2).map(x => x.zone.name))].join(', ');
-    return { cls: 'v-orange', ico: '⚠️', title: '비행승인 필요', desc: `${names} 안입니다. 드론 원스톱에서 비행승인을 받아야 합니다. (승인 없이 비행 시 과태료 150만원, 1차 위반 기준)`, code: 'approval' };
+    return { cls: 'v-orange', ico: '⚠️', title: '비행승인 필요', desc: `${names} 안입니다. 드론 원스톱에서 비행승인을 받아야 합니다.`, code: 'approval' };
   }
   const critical = failed.filter(f => f.zone.level >= 1); // 금지·제한·주의 구역 데이터가 빠졌을 때만 판정 보류
   if (critical.length && top < 2) {
@@ -347,6 +347,7 @@ async function fetchWeather(lat, lon) {
   const u = 'https://api.open-meteo.com/v1/forecast?' + new URLSearchParams({
     latitude: lat.toFixed(4), longitude: lon.toFixed(4),
     current: 'temperature_2m,precipitation,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m',
+    hourly: 'precipitation_probability,precipitation', forecast_hours: '3',
     daily: 'sunrise,sunset', timezone: 'Asia/Seoul', wind_speed_unit: 'ms', forecast_days: '1'
   });
   const r = await fetch(u); if (!r.ok) throw new Error('날씨 오류');
@@ -385,8 +386,11 @@ function weatherIssues(w) {
     windStrong: c.wind_gusts_10m >= L || c.wind_speed_10m >= L * 0.75,
     windMid: !(c.wind_gusts_10m >= L || c.wind_speed_10m >= L * 0.75) && (c.wind_gusts_10m >= L * 0.65 || c.wind_speed_10m >= L * 0.5),
     limit: L,
-    rain: c.precipitation > 0 || [51, 53, 55, 61, 63, 65, 66, 67, 71, 73, 75, 77, 80, 81, 82, 85, 86, 95, 96, 99].includes(c.weather_code),
-    fog: c.weather_code === 45 || c.weather_code === 48
+    rain: c.precipitation > 0 || (w.hourly && w.hourly.precipitation && (w.hourly.precipitation[0] || 0) >= 0.3) || [51, 53, 55, 61, 63, 65, 66, 67, 71, 73, 75, 77, 80, 81, 82, 85, 86, 95, 96, 99].includes(c.weather_code),
+    fog: c.weather_code === 45 || c.weather_code === 48,
+    // 앞으로 3시간: 비 올 확률(최대)·예상 강수량(합)
+    rainProb: w.hourly && w.hourly.precipitation_probability ? Math.max(...w.hourly.precipitation_probability.map(v => v || 0)) : null,
+    rainMm: w.hourly && w.hourly.precipitation ? Math.round(w.hourly.precipitation.reduce((a, v) => a + (v || 0), 0) * 10) / 10 : 0
   };
 }
 function weatherHtml(w) {
@@ -398,6 +402,7 @@ function weatherHtml(w) {
   if (iss.windStrong) notes.push(`💨 강풍 — ${who}의 내풍 한계(${dr.wind}m/s) 기준으로 지금 바람이 너무 강합니다.`);
   else if (iss.windMid) notes.push(`💨 바람이 다소 강합니다(${who} 한계 ${dr.wind}m/s). 높이 올라갈수록 더 세질 수 있어요.`);
   if (iss.rain) notes.push('🌧 강수가 있습니다. 방수 기체가 아니면 비행을 피하세요.');
+  else if (iss.rainProb >= 40 || iss.rainMm >= 0.3) notes.push(`🌦 3시간 안에 비 올 확률 ${iss.rainProb != null ? iss.rainProb + '%' : '있음'}${iss.rainMm ? ` (예상 ${iss.rainMm}mm)` : ''} — 비행 전 하늘을 꼭 확인하세요.`);
   if (iss.fog) notes.push('🌫 안개로 가시권 확보가 어렵습니다.');
   if (night) notes.push(`🌙 지금은 야간(일몰 ${sunset} 이후~일출 ${sunrise} 전)이라 특별비행승인 없이는 비행할 수 없습니다.`);
   if (!notes.length) notes.push('👍 비행하기 괜찮은 날씨입니다.');
@@ -408,9 +413,10 @@ function weatherHtml(w) {
       <div><b>${Math.round(c.temperature_2m)}°</b><span>${WX[c.weather_code] || '날씨'}</span></div>
       <div><b>${sunrise}</b><span>일출</span></div>
       <div><b>${sunset}</b><span>일몰</span></div>
-      <div><b>${c.precipitation}</b><span>강수 mm</span></div>
+      <div><b>${iss.rainProb != null ? iss.rainProb + '%' : c.precipitation}</b><span>${iss.rainProb != null ? '비 올 확률 (3시간)' : '강수 mm'}</span></div>
     </div>
     <div class="wx-note">${notes.join('<br>')}</div>
+    <p class="muted small">※ 날씨는 예보 모델 값이라 실제와 다를 수 있어요. 비가 오거나 바람이 세면 화면과 상관없이 비행하지 마세요.</p>
     <label class="drone-pick">내 기체
       <select id="dronePick">${DRONES.map(d => `<option value="${d.id}"${d.id === dr.id ? ' selected' : ''}>${esc(d.name)}</option>`).join('')}</select>
     </label>
@@ -671,7 +677,7 @@ function renderResult(r) {
   if (failShow.length && r.verdict.code !== 'error') h += `<p class="muted small">일부 데이터 조회 실패: ${failShow.map(f => esc(f.zone.name) + (f.error ? ` (${esc(f.error)})` : '')).join(', ')}</p>`;
   if (r.fromNational && r.fromNational.length) {
     const d = t => { const k = new Date(t); return `${k.getMonth() + 1}/${k.getDate()}`; };
-    h += `<p class="muted small">ℹ️ ${r.fromNational.map(x => `${esc(x.zone.name)}은(는) 서버 응답이 없어 휴대폰에 저장된 전국 자료(${d(x.t)} 받음)로 확인했어요.`).join(' ')}</p>`;
+    h += `<p class="muted small">ℹ️ ${r.fromNational.map(x => esc(x.zone.name)).join('·')}은 저장된 전국 자료(${d(Math.min(...r.fromNational.map(x => x.t)))})로 확인했어요.</p>`;
   }
   h += `<div id="wxBox"><div class="hint"><span class="spinner"></span>날씨 확인 중…</div></div>
     <p class="muted small" style="margin-top:12px">※ 참고용입니다. 항공고시보(임시 구역)는 드론 관련만 30분 간격으로 반영돼 늦을 수 있으니 비행 전 드론 원스톱에서 최종 확인하세요.</p>`;
