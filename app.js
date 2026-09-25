@@ -21,7 +21,7 @@ const ZONES = [
   { id: 'LT_C_AISCTRC', name: '관제권(공항 주변)', level: 3, color: '#9fb596', pat: 'fill', note: '원칙적으로 비행승인 필요' },
   { id: 'LT_C_AISRESC', name: '비행제한구역', level: 2, color: '#43a047', pat: 'hatch', note: '비행승인 필요' },
   { id: 'LT_C_AISDNGC', name: '위험구역', level: 2, color: '#3cc8b4', pat: 'hatch', note: '비행승인 필요' },
-  { id: 'LT_C_AISMOAC', name: '군작전구역', level: 1, color: '#f9a825', pat: 'hatch', note: '군 작전 공역 — 비행 전 확인 권장', off: true },
+  { id: 'LT_C_AISMOAC', name: '군작전구역', level: 0, color: '#f9a825', pat: 'hatch', note: '군 작전 공역 — 취미 비행은 조종자 준수사항만 지키면 비행 가능', off: true },
   { id: 'LT_C_AISUAC',  name: '초경량비행장치 공역', level: 0, color: '#f2a0a0', pat: 'fill', note: '초경량비행장치 비행 공역' },
   // ↓ V-World에 있는지 확인되지 않은 레이어: 조회에 성공한 경우에만 사용·표시
   { id: 'LT_C_AISTEMP', name: '임시비행금지구역', level: 3, color: '#c62828', pat: 'hatch', note: '행사·훈련 등으로 임시 지정 — 비행 불가', optional: true },
@@ -546,6 +546,7 @@ async function checkAt(lat, lon, label, opt = {}) {
     return;
   }
   if (pinMarker) pinMarker.setLatLng([lat, lon]); else pinMarker = L.marker([lat, lon]).addTo(map);
+  pinLabel(null);
   if (!opt.silent) {
     zoneGeo.clearLayers();
     sheetHtml(`<div class="hint"><span class="spinner"></span>공역 정보를 확인하는 중…</div>`);
@@ -559,6 +560,7 @@ async function checkAt(lat, lon, label, opt = {}) {
   lastResult = res;
   renderResult(res);
   drawZones(res);
+  pinLabel(res);
   const incomplete = res.verdict.code === 'partial' || res.verdict.code === 'error';
   if (incomplete && !opt.retried) {
     // 브이월드가 잠깐 응답하지 않은 경우가 많아서 몇 초 뒤 한 번 자동으로 다시 확인
@@ -586,6 +588,7 @@ function showWeather(r) {
 // 공역 판정 + 현재 조건(야간·바람·비·안개)을 합쳐 맨 위 판정을 갱신
 function applyWeatherToVerdict(r, iss) {
   const el0 = $('#sheetBody .verdict'), v0 = r.verdict;
+  if (r === lastResult) pinLabel(r);
   if (el0) { el0.className = 'verdict ' + v0.cls; el0.innerHTML = `<div class="ico">${v0.ico}</div><div><b>${esc(v0.title)}</b><small>${esc(v0.desc)}</small></div>`; }
   const probs = [];
   if (iss.night) probs.push(`야간(일몰 ${iss.sunset}~일출 ${iss.sunrise})`);
@@ -608,8 +611,34 @@ function applyWeatherToVerdict(r, iss) {
     r.verdict = Object.assign({}, v, { desc: v.desc + ` 또한 지금은 ${probs.join(', ')}입니다.` });
   }
   const nv = r.verdict;
+  pinLabel(r);
   el.className = 'verdict ' + nv.cls;
   el.innerHTML = `<div class="ico">${nv.ico}</div><div><b>${esc(nv.title)}</b><small>${esc(nv.desc)}</small></div>`;
+}
+
+/* 지도 핀 위 말풍선: 이 지점의 구역과 판정을 한눈에 */
+const PIN_SHORT = { no: '비행 불가 · 승인 필요', approval: '비행승인 필요', caution: '주의 · 확인 후 비행', ok: '비행 가능', partial: '다시 확인 필요', error: '판정할 수 없음' };
+function pinLabel(r) {
+  if (!pinMarker || !pinMarker.bindTooltip) return;
+  let ico = '⏳', cls = 'v-gray', t1 = '확인 중…', t2 = '';
+  if (r) {
+    const v = r.verdict, top = r.inside.filter(x => x.zone.level > 0).sort((a, b) => b.zone.level - a.zone.level)[0];
+    const ua = r.inside.find(x => x.zone.id === 'LT_C_AISUAC');
+    t1 = top ? top.zone.name.replace(/\(항공고시보\)$/, ' (항공고시보)') : ua ? '초경량비행장치 공역' : '비행금지·제한 구역 아님';
+    t2 = PIN_SHORT[v.code] || v.title;
+    if (v.now === 'bad') t2 += v.ico === '🌙' ? ' · 지금은 야간' : ' · 지금은 날씨 나쁨';
+    const near = r.nearby.find(x => x.dist > 0 && x.dist < 1000 && x.zone.level >= 2);
+    if (v.code === 'ok' && near) t2 += ` · ${fmtDist(near.dist)} 옆 ${near.zone.name}`;
+    ico = { 'v-red': '⛔', 'v-orange': '⚠️', 'v-yellow': v.now === 'bad' ? v.ico : '🟡', 'v-green': '✅', 'v-gray': '❔' }[v.cls] || v.ico;
+    cls = v.cls;
+  }
+  const html = `<div class="pin-tip-in pt-${cls.slice(2)}"><span class="pt-ico">${ico}</span><span><b>${esc(t1)}</b>${t2 ? `<small>${esc(t2)}</small>` : ''}</span></div>`;
+  if (pinMarker.getTooltip && pinMarker.getTooltip()) pinMarker.setTooltipContent(html);
+  else {
+    pinMarker.bindTooltip(html, { permanent: true, direction: 'top', offset: [-16, -16], className: 'pin-tip', interactive: true });
+    const tt = pinMarker.getTooltip && pinMarker.getTooltip();
+    if (tt && tt.on) tt.on('click', () => { if (sheet.classList.contains('collapsed')) setCollapsed(false); });
+  }
 }
 
 function zoneRow(x, showDist) {

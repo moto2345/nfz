@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="하코 NFZ">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-  <link rel="stylesheet" href="style.css?v=27">
+  <link rel="stylesheet" href="style.css?v=29">
 </head>
 <body>
 
@@ -20,7 +20,7 @@
 <header class="appbar">
   <img src="icons/icon-192.png" alt="" class="appbar-logo">
   <h1>하코 NFZ 조회</h1>
-  <span class="badge">웹버전 v1.27</span>
+  <span class="badge">웹버전 v1.29</span>
   <button id="btnNotam" class="appbar-btn notam hidden" type="button" aria-label="항공고시보" title="드론 관련 항공고시보">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M10 20.5a2.2 2.2 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
     <span id="notamCount" class="cnt">0</span>
@@ -108,7 +108,7 @@
     <ul class="legend">
       <li><i style="background:#e53935"></i>⛔ 비행금지구역 · 관제권 안 — 승인 없이 비행 불가</li>
       <li><i style="background:#fb8c00"></i>⚠️ 비행제한구역 · 위험구역 · 비행장교통구역 안 — 비행승인 필요</li>
-      <li><i style="background:#fdd835"></i>🟡 군작전구역 · 경계구역 · 국립공원 안 — 비행 전 확인 권장</li>
+      <li><i style="background:#fdd835"></i>🟡 경계구역 · 국립공원 안 — 비행 전 확인 권장 (군작전구역은 취미 비행 가능으로 판정)</li>
       <li><i style="background:#43a047"></i>✅ 초경량비행장치 공역 · 일반 공역 — 비행승인 불필요 (조종자 준수사항 준수)</li>
       <li><i style="background:#fdd835"></i>🌙 노란색이 날씨·야간 때문이면 "공역은 가능 · 지금은 야간"처럼 표시</li>
     </ul>
@@ -231,7 +231,7 @@
 <div id="toast" class="toast hidden"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="config.js?v=27"></script>
-<script src="app.js?v=27"></script>
+<script src="config.js?v=29"></script>
+<script src="app.js?v=29"></script>
 </body>
 </html>
