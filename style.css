@@ -46,10 +46,10 @@ a{color:var(--primary)}
 .fab-col{position:absolute;right:10px;bottom:calc(var(--sheet-h,96px) + 11px);z-index:800;display:flex;flex-direction:column;gap:8px;transition:bottom .2s}
 /* 지도 왼쪽 아래 지자기 Kp 표시 (오른쪽 내 위치 버튼과 같은 높이, 결과창 높이를 따라 움직임) */
 .kp-badge{position:absolute;left:10px;bottom:calc(var(--sheet-h,96px) + 11px);z-index:800;transition:bottom .2s;
-  min-width:52px;height:45px;padding:0 10px;border:0;border-radius:23px;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.25);
+  min-width:45px;height:45px;padding:0 6px;border:0;border-radius:23px;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.25);
   display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.1;cursor:pointer;-webkit-tap-highlight-color:transparent}
-.kp-badge small{font-size:10px;color:var(--muted);font-weight:600}
-.kp-badge b{font-size:14px;font-weight:800;color:var(--green);font-variant-numeric:tabular-nums;white-space:nowrap}
+.kp-badge small{font-size:10px;color:var(--muted);font-weight:700}
+.kp-badge b{font-size:15px;font-weight:800;color:var(--green);font-variant-numeric:tabular-nums;white-space:nowrap}
 .kp-badge.kp-mid b{color:#e65100}
 .kp-badge.kp-bad{background:#fdecea}
 .kp-badge.kp-bad b{color:var(--red)}

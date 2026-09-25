@@ -478,7 +478,7 @@ function updateKpBadge(v) {
   kpShown = v;
   const lv = kpLevel(v.now);
   el.className = 'kp-badge ' + lv.cls;
-  $('#kpVal').textContent = 'Kp ' + v.now;
+  $('#kpVal').textContent = v.now;
 }
 function refreshKp() { if (!document.hidden) fetchKp().then(updateKpBadge).catch(() => {}); }
 refreshKp();
