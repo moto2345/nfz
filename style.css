@@ -201,6 +201,7 @@ a.btn{text-decoration:none;color:var(--primary)}
 .notam-item{border:1px solid var(--line);border-left:4px solid #ef6c00;border-radius:10px;padding:10px 12px;margin:8px 0;font-size:13px}
 .notam-item.active{border-left-color:#c62828}
 .recheck{display:flex;align-items:center;gap:8px;margin:-2px 0 10px}
+.acc-warn{font-size:12px;background:#fff4e5;color:#8a4b00;border-radius:8px;padding:6px 8px;margin:6px 0}
 .linkbtn{border:0;background:none;padding:0 2px;margin-left:4px;color:var(--primary);font:inherit;font-weight:700;text-decoration:underline;text-underline-offset:2px;cursor:pointer}
 .notam-item .meta{color:var(--muted);font-size:12px;margin:4px 0;line-height:1.5}
 .notam-text{white-space:pre-wrap;font-size:12px;background:var(--bg);border-radius:8px;padding:6px 8px;margin:6px 0;max-height:96px;overflow-y:auto;font-family:ui-monospace,monospace}
@@ -219,3 +220,11 @@ a.btn{text-decoration:none;color:var(--primary)}
 .pin-tip-in.pt-orange{border-left-color:var(--orange)}
 .pin-tip-in.pt-yellow{border-left-color:var(--yellow)}
 .pin-tip-in.pt-green{border-left-color:var(--green)}
+
+/* 연결 점검 */
+.diag{list-style:none;padding:0;margin:6px 0 0}
+.diag li{display:grid;grid-template-columns:20px 1fr;gap:2px 6px;padding:6px 0;border-top:1px solid var(--line);font-size:12px}
+.diag li span{grid-row:span 2}
+.diag li small{grid-column:2;color:var(--muted);word-break:break-all}
+.diag li.bad b{color:var(--red)}
+.diag li.warn b{color:#e65100}

@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="하코 NFZ">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-  <link rel="stylesheet" href="style.css?v=32">
+  <link rel="stylesheet" href="style.css?v=33">
 </head>
 <body>
 
@@ -20,7 +20,7 @@
 <header class="appbar">
   <img src="icons/icon-192.png" alt="" class="appbar-logo">
   <h1>하코 NFZ 조회</h1>
-  <span class="badge">웹버전 v1.32</span>
+  <span class="badge">웹버전 v1.33</span>
   <button id="btnNotam" class="appbar-btn notam hidden" type="button" aria-label="항공고시보" title="드론 관련 항공고시보">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M10 20.5a2.2 2.2 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
     <span id="notamCount" class="cnt">0</span>
@@ -176,8 +176,19 @@
       <li><a href="https://drone.onestop.go.kr" target="_blank" rel="noopener">드론 원스톱 민원서비스 (비행승인·촬영허가)</a></li>
       <li><a href="https://www.vworld.kr" target="_blank" rel="noopener">브이월드 (공간정보 오픈플랫폼)</a></li>
     </ul>
-    <p class="muted small">날씨: Open-Meteo · 지도·공역·주소: V-World</p>
+    <p class="muted small">날씨: Open-Meteo · 지자기: NOAA · 지도·공역·주소: V-World</p>
   </div>
+
+  <details class="card" id="diagCard">
+    <summary>🔧 연결 점검 (자료가 안 불러와질 때)</summary>
+    <p class="small">인증키와 지도·공역·주소·날씨·항공고시보 서버에 실제로 연결해 보고 결과를 보여줘요. 보통 30초, 서버가 느리면 1~2분 걸려요. 결과가 이상하면 [결과 복사]로 보내 주세요.</p>
+    <div class="row-btns">
+      <button id="btnDiag" class="btn primary" type="button">점검 시작</button>
+      <button id="btnDiagCopy" class="btn hidden" type="button">결과 복사</button>
+    </div>
+    <p id="diagSum" class="small"></p>
+    <ul id="diagOut" class="diag"></ul>
+  </details>
 </section>
 
 <!-- ═════════ 하단 탭바 ═════════ -->
@@ -231,7 +242,7 @@
 <div id="toast" class="toast hidden"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="config.js?v=32"></script>
-<script src="app.js?v=32"></script>
+<script src="config.js?v=33"></script>
+<script src="app.js?v=33"></script>
 </body>
 </html>

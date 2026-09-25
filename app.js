@@ -7,7 +7,14 @@ const CFG = Object.assign({ VWORLD_KEY: '', CHECK_RADIUS_M: 5000, DEFAULT_CENTER
 /* ───────── 저장소 ───────── */
 const LS = {
   get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
-  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  set(k, v) {
+    const str = JSON.stringify(v);
+    try { localStorage.setItem(k, str); return true; } catch (e) {}
+    try { // 용량 부족 → 언제든 다시 받을 수 있는 전국 공역 자료부터 비움
+      Object.keys(localStorage).filter(x => x.startsWith('nat:') && x !== k).forEach(x => localStorage.removeItem(x));
+      localStorage.setItem(k, str); return true;
+    } catch (e) { return false; }
+  }
 };
 const vkey = () => (CFG.VWORLD_KEY || '').trim();
 try { localStorage.removeItem('vworldKey'); } catch (e) {}
@@ -24,7 +31,7 @@ const ZONES = [
   { id: 'LT_C_AISMOAC', name: '군작전구역', level: 0, color: '#f9a825', pat: 'hatch', note: '군 작전 공역 — 취미 비행은 조종자 준수사항만 지키면 비행 가능', off: true },
   { id: 'LT_C_AISUAC',  name: '초경량비행장치 공역', level: 0, color: '#f2a0a0', pat: 'fill', note: '초경량비행장치 비행 공역' },
   // ↓ V-World에 있는지 확인되지 않은 레이어: 조회에 성공한 경우에만 사용·표시
-  { id: 'LT_C_AISTEMP', name: '임시비행금지구역', level: 3, color: '#c62828', pat: 'hatch', note: '행사·훈련 등으로 임시 지정 — 비행 불가', optional: true },
+  { id: 'LT_C_AISTEMP', name: '임시비행금지구역', level: 3, color: '#c62828', pat: 'hatch', note: '행사·훈련 등으로 임시 지정 — 비행 불가', optional: true, noCache: true },
   { id: 'LT_C_AISATZC', name: '비행장교통구역', level: 2, color: '#9e9e9e', pat: 'hatch', note: '비행장 주변 — 비행승인 필요', optional: true },
   { id: 'LT_C_AISALTC', name: '경계구역', level: 1, color: '#b39b72', pat: 'hatch', note: '훈련 등 경계 공역 — 비행 전 확인 권장', optional: true, off: true },
   { id: 'LT_C_WGISNPGUG', name: '국립공원', level: 1, color: '#2ecc40', pat: 'fill', note: '국립공원 — 공원사무소 사전 허가 필요', optional: true, off: true },
@@ -52,6 +59,18 @@ function toast(msg, ms = 2600) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add('hidden'), ms);
 }
 
+// 응답이 너무 늦으면 포기하는 fetch (느린 서버 하나가 전체를 붙잡지 않게)
+function fetchT(url, opts = {}, ms = 12000) {
+  const ac = typeof AbortController === 'function' ? new AbortController() : null;
+  const t = ac ? setTimeout(() => ac.abort(), ms) : 0;
+  return fetch(url, Object.assign({}, opts, ac ? { signal: ac.signal } : {})).then(r => {
+    // 본문(json)을 다 받을 때까지도 같은 시간 제한 안에서
+    const json = r.json.bind(r);
+    r.json = () => json().finally(() => clearTimeout(t));
+    return r;
+  }, e => { clearTimeout(t); throw e; });
+}
+
 // V-World는 CORS를 허용하지 않아 JSONP(callback)로 호출
 let jsonpSeq = 0;
 // 브이월드에 한꺼번에 너무 많이 요청하면 일부가 실패하므로 4개씩 나눠서 보내고, 실패하면 한 번 더 시도
@@ -73,9 +92,11 @@ function jsonpRaw(url, params, timeout) {
     const cb = '__vw' + (++jsonpSeq) + '_' + Date.now();
     const s = document.createElement('script');
     const timer = setTimeout(() => { finish(); reject(new Error('응답 시간 초과')); }, timeout);
-    function finish() { clearTimeout(timer); window[cb] = function () {}; s.remove(); }
-    window[cb] = data => { finish(); resolve(data); };
+    let done = false;
+    function finish() { done = true; clearTimeout(timer); window[cb] = function () {}; s.remove(); }
+    window[cb] = data => { finish(); try { delete window[cb]; } catch (e) {} resolve(data); };
     s.onerror = () => { finish(); reject(new Error('네트워크 오류')); };
+    s.onload = () => setTimeout(() => { if (!done) { finish(); reject(new Error('응답 형식 오류')); } }, 100);
     s.src = url + '?' + new URLSearchParams(Object.assign({}, params, { callback: cb })).toString();
     document.head.appendChild(s);
   });
@@ -139,16 +160,18 @@ function propsTable(props) {
 // 필수 공역이 계속 실패하면 → 휴대폰에 저장해 둔 전국 자료(없으면 지금 받아서)로 대신 판정
 const KOREA_BOX = ['124', '32.5', '132', '39'];
 const NATIONAL_KEEP = ['LT_C_AISPRHC', 'LT_C_AISCTRC']; // 전국 자료를 미리 받아 둘 공역(수가 적고 가장 중요)
-const NATIONAL_DAYS = 30;
+const NATIONAL_DAYS = 30;      // 이 기간이 지나면 새로 받음
+const NATIONAL_MAX_DAYS = 120; // 이보다 오래된 자료는 판정에 쓰지 않음
 const nationalMem = new Map();
 function nationalGet(id) {
-  if (nationalMem.has(id)) return nationalMem.get(id);
-  const c = LS.get('nat:' + id, null);
-  if (c && Array.isArray(c.f)) { nationalMem.set(id, c); return c; }
-  return null;
+  let c = nationalMem.get(id);
+  if (!c) { c = LS.get('nat:' + id, null); if (c && Array.isArray(c.f) && c.f.length && c.f.length < 1000) nationalMem.set(id, c); else c = null; }
+  return c && Date.now() - c.t < NATIONAL_MAX_DAYS * 864e5 ? c : null;
 }
 async function nationalFetch(zone) {
   const f = await queryLayerOnce(zone, KOREA_BOX, 30000);
+  // 전국에 이 공역이 하나도 없거나(0건) 1000건에서 잘렸다면 믿을 수 없는 결과
+  if (!f.length || f.length >= 1000) throw new Error('전국 자료 이상(' + f.length + '건)');
   const c = { t: Date.now(), f };
   nationalMem.set(zone.id, c);
   try { localStorage.setItem('nat:' + zone.id, JSON.stringify(c)); } catch (e) {} // 용량이 넘치면 이번 실행 동안만 사용
@@ -174,16 +197,32 @@ function nationalRefresh() {
   nationalBusy = true;
   setTimeout(async () => { for (const z of todo) { try { await nationalFetch(z); } catch (e) {} } nationalBusy = false; }, 5000);
 }
+const decisive = z => !z.optional || (verified.has(z.id) && z.level >= 2); // 판정에 꼭 필요한 공역
+// V-World에 없는 것으로 보이는 선택 레이어는 3번 연속 실패하면 7일간 조회를 쉼
+const optFail = LS.get('optFail', {});
+const optSkipped = z => z.optional && !verified.has(z.id) && optFail[z.id] && optFail[z.id].n >= 3 && Date.now() - optFail[z.id].t < 7 * 864e5;
+function optResult(z, ok, err) {
+  if (!z.optional) return;
+  if (ok) { if (optFail[z.id]) { delete optFail[z.id]; LS.set('optFail', optFail); } return; }
+  if (!err || !err.vw || err.code === 'INCORRECT_KEY') return; // 통신 문제·인증키 거부는 '없는 레이어'의 근거가 아님
+  optFail[z.id] = { n: ((optFail[z.id] && optFail[z.id].n) || 0) + 1, t: Date.now() };
+  // 확인됐던 레이어라도 5번 연속 '없음' 류 오류면 확인 해제 (브이월드에서 없어진 경우)
+  if (verified.has(z.id) && optFail[z.id].n >= 5) { verified.delete(z.id); LS.set('verifiedLayers', [...verified]); }
+  LS.set('optFail', optFail);
+}
 async function queryLayer(zone, bbox) {
-  try { return await queryLayerOnce(zone, bbox); }
+  if (optSkipped(zone)) throw new Error('건너뜀');
+  try { const r = await queryLayerOnce(zone, bbox); optResult(zone, true); return r; }
   catch (e) {
-    if (zone.optional) throw e;
+    optResult(zone, false, e);
+    if (!decisive(zone)) throw e;
     await new Promise(r => setTimeout(r, 800));
-    try { return await queryLayerOnce(zone, bbox); } // 필수 공역은 한 번 더
+    try { const r2 = await queryLayerOnce(zone, bbox); optResult(zone, true); return r2; } // 필수 공역은 한 번 더
     catch (e2) {
-      if (zone.level < 1) throw e2; // 판정에 영향 없는 공역은 대체하지 않음
+      if (zone.level < 1 || zone.noCache) throw e2; // 판정에 영향 없는 공역·수시로 바뀌는 임시 구역은 대체하지 않음
       let c = nationalGet(zone.id);
       if (!c) { try { c = await nationalFetch(zone); } catch (e3) {} }
+      else if (Date.now() - c.t > NATIONAL_DAYS * 864e5) nationalFetch(zone).catch(() => {}); // 뒤에서 새로 받아 둠
       if (!c) throw e2;
       const out = inBox(c.f, bbox);
       out.fromNational = c.t;
@@ -200,7 +239,7 @@ async function queryLayerOnce(zone, bbox, timeout) {
   const r = res && res.response;
   if (!r) throw new Error('잘못된 응답');
   if (r.status === 'NOT_FOUND') return [];
-  if (r.status !== 'OK') throw new Error((r.error && (r.error.text || r.error.code)) || r.status);
+  if (r.status !== 'OK') throw Object.assign(new Error((r.error && (r.error.text || r.error.code)) || r.status), { vw: true, code: r.error && r.error.code });
   return (r.result && r.result.featureCollection && r.result.featureCollection.features) || [];
 }
 
@@ -210,7 +249,7 @@ async function analyze(lat, lon) {
   const inside = [], nearby = [], failed = [], fromNational = [];
   settled.forEach((s, i) => {
     const zone = ZONES[i];
-    if (s.status === 'rejected') { if (!zone.optional) failed.push({ zone, error: s.reason && s.reason.message }); return; }
+    if (s.status === 'rejected') { if (decisive(zone)) failed.push({ zone, error: s.reason && s.reason.message }); return; }
     if (s.value.fromNational) fromNational.push({ zone, t: s.value.fromNational });
     markVerified(zone);
     for (const f of s.value) {
@@ -236,30 +275,44 @@ async function analyze(lat, lon) {
   }
   inside.sort((a, b) => b.zone.level - a.zone.level);
   nearby.sort((a, b) => a.dist - b.dist);
-  return { lat, lon, inside, nearby, failed, fromNational, verdict: makeVerdict(inside, nearby, failed) };
+  const verdict = makeVerdict(inside, nearby, failed);
+  const notamMissing = !notamData;
+  const notamAge = notamData && notamData.fetchedAtUTC ? (Date.now() - Date.parse(notamData.fetchedAtUTC)) / 3600e3 : 0;
+  if (verdict.code === 'ok' || verdict.code === 'caution') {
+    const warn = notamMissing ? '항공고시보(임시 비행금지 등)를 아직 불러오지 못해 판정에 반영되지 않았어요.'
+      : notamAge > 8 ? `항공고시보 자료가 ${Math.round(notamAge)}시간 전 것이라 최신이 아닐 수 있어요.` : '';
+    if (warn) { verdict.desc += ' ⚠️ ' + warn; verdict.nearNote = [verdict.nearNote, warn].filter(Boolean).join(' '); }
+  }
+  return { lat, lon, inside, nearby, failed, fromNational, notamMissing, verdict };
 }
 
 function makeVerdict(inside, nearby, failed) {
   const top = inside.reduce((m, x) => Math.max(m, x.zone.level), -1);
   const has = id => inside.some(x => x.zone.id === id);
   const near = nearby[0];
-  if (failed.length >= ZONES.filter(z => !z.optional).length) {
-    const why = [...new Set(failed.map(f => f.error).filter(Boolean))].slice(0, 2).join(' / ');
-    return { cls: 'v-gray', ico: '❔', title: '판정할 수 없음', desc: '공역 데이터를 불러오지 못했습니다. 아래 [다시 확인]을 눌러 주세요.' + (why ? ` (원인: ${why})` : ''), code: 'error' };
-  }
   if (top === 3) {
     const names = [...new Set(inside.filter(x => x.zone.level === 3).map(x => x.zone.name))].join(', ');
     return { cls: 'v-red', ico: '⛔', title: '비행 불가 (승인 필요)', desc: `${names} 안입니다. 드론 원스톱에서 비행승인을 받아야 합니다.`, code: 'no' };
   }
+  if (failed.filter(f => !f.zone.optional && f.zone.level >= 1).length >= ZONES.filter(z => !z.optional && z.level >= 1).length) {
+    const why = [...new Set(failed.map(f => f.error).filter(Boolean))].slice(0, 2).join(' / ');
+    return { cls: 'v-gray', ico: '❔', title: '판정할 수 없음', desc: '공역 데이터를 불러오지 못했습니다. 아래 [다시 확인]을 눌러 주세요.' + (why ? ` (원인: ${why})` : ''), code: 'error' };
+  }
+  // 불러오지 못한 공역이 지금 찾은 것보다 더 엄격할 수 있으면 판정을 확정하지 않음
+  const critical = failed.filter(f => f.zone.level >= 1 && f.zone.level > Math.max(top, 0));
+  if (critical.length) {
+    const names = critical.map(f => f.zone.name).join(', ');
+    const why = [...new Set(critical.map(f => f.error).filter(Boolean))].slice(0, 2).join(' / ');
+    const tail = `${names} 데이터를 불러오지 못해 판정을 확정할 수 없습니다. 아래 [다시 확인]을 눌러 주세요.` + (why ? ` (원인: ${why})` : '');
+    if (top === 2) {
+      const n2 = [...new Set(inside.filter(x => x.zone.level === 2).map(x => x.zone.name))].join(', ');
+      return { cls: 'v-orange', ico: '⚠️', title: '비행승인 필요 (일부 확인 불완전)', desc: `${n2} 안이라 최소한 비행승인이 필요합니다. ` + tail, code: 'partial' };
+    }
+    return { cls: 'v-gray', ico: '⚠️', title: '확인 불완전 — 다시 확인 필요', desc: tail, code: 'partial' };
+  }
   if (top === 2) {
     const names = [...new Set(inside.filter(x => x.zone.level === 2).map(x => x.zone.name))].join(', ');
     return { cls: 'v-orange', ico: '⚠️', title: '비행승인 필요', desc: `${names} 안입니다. 드론 원스톱에서 비행승인을 받아야 합니다.`, code: 'approval' };
-  }
-  const critical = failed.filter(f => f.zone.level >= 1); // 금지·제한·주의 구역 데이터가 빠졌을 때만 판정 보류
-  if (critical.length && top < 2) {
-    const names = critical.map(f => f.zone.name).join(', ');
-    const why = [...new Set(critical.map(f => f.error).filter(Boolean))].slice(0, 2).join(' / ');
-    return { cls: 'v-gray', ico: '⚠️', title: '확인 불완전 — 다시 확인 필요', desc: `${names} 데이터를 불러오지 못해 비행 가능 여부를 확정할 수 없습니다. 아래 [다시 확인]을 눌러 주세요.` + (why ? ` (원인: ${why})` : ''), code: 'partial' };
   }
   // 이 지점이 시간제(지금 비활성)·곧 시작될 항공고시보 구역 안이면 따로 알림
   const soon = nearby.find(x => x.notam && x.dist === 0);
@@ -350,7 +403,7 @@ async function fetchWeather(lat, lon) {
     hourly: 'precipitation_probability,precipitation', forecast_hours: '3',
     daily: 'sunrise,sunset', timezone: 'Asia/Seoul', wind_speed_unit: 'ms', forecast_days: '1'
   });
-  const [r, kp] = await Promise.all([fetch(u), fetchKp().catch(() => null)]);
+  const [r, kp] = await Promise.all([fetchT(u, {}, 12000), Promise.race([fetchKp(), new Promise(res => setTimeout(() => res(null), 6000))]).catch(() => null)]);
   if (!r.ok) throw new Error('날씨 오류');
   const w = await r.json();
   w.kp = kp;
@@ -362,8 +415,8 @@ async function fetchKp() {
   if (kpCache && Date.now() - kpCache.t < 600e3) return kpCache.v;
   const base = 'https://services.swpc.noaa.gov/';
   const [a, b] = await Promise.all([
-    fetch(base + 'json/planetary_k_index_1m.json').then(r => r.ok ? r.json() : null).catch(() => null),
-    fetch(base + 'products/noaa-planetary-k-index-forecast.json').then(r => r.ok ? r.json() : null).catch(() => null)
+    fetchT(base + 'json/planetary_k_index_1m.json', {}, 6000).then(r => r.ok ? r.json() : null).catch(() => null),
+    fetchT(base + 'products/noaa-planetary-k-index-forecast.json', {}, 6000).then(r => r.ok ? r.json() : null).catch(() => null)
   ]);
   let now = null, max6 = null;
   if (Array.isArray(a) && a.length) { const l = a[a.length - 1]; now = +(l.estimated_kp != null ? l.estimated_kp : l.kp_index); }
@@ -405,10 +458,25 @@ const DRONES = [
   { id: 'etc-m', name: '기타 중형 (250g~2kg)', wind: 10 }
 ];
 const currentDrone = () => DRONES.find(d => d.id === LS.get('drone', 'std')) || DRONES[0];
+const kstNowHM = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(11, 16);
+// 일출·일몰(한국시간 HH:MM)을 휴대폰에서 직접 계산 — 날씨를 못 받아와도 야간 판정은 하도록
+function sunTimesKST(lat, lon) {
+  const rad = Math.PI / 180, k = new Date(Date.now() + 9 * 3600e3);
+  const noon = Date.UTC(k.getUTCFullYear(), k.getUTCMonth(), k.getUTCDate(), 3); // 한국 정오
+  const n = Math.round(noon / 864e5 + 2440587.5 - 2451545.0 + 0.0008);
+  const J = n - lon / 360, M = (357.5291 + 0.98560028 * J) % 360;
+  const C = 1.9148 * Math.sin(M * rad) + 0.02 * Math.sin(2 * M * rad) + 0.0003 * Math.sin(3 * M * rad);
+  const lam = (M + C + 180 + 102.9372) % 360;
+  const Jt = 2451545.0 + J + 0.0053 * Math.sin(M * rad) - 0.0069 * Math.sin(2 * lam * rad);
+  const dec = Math.asin(Math.sin(lam * rad) * Math.sin(23.4397 * rad));
+  const w0 = Math.acos((Math.sin(-0.833 * rad) - Math.sin(lat * rad) * Math.sin(dec)) / (Math.cos(lat * rad) * Math.cos(dec))) / rad;
+  const hm = j => new Date((j - 2440587.5) * 864e5 + 9 * 3600e3).toISOString().slice(11, 16);
+  return { sunrise: hm(Jt - w0 / 360), sunset: hm(Jt + w0 / 360) };
+}
 function windDir(deg) { return ['북', '북동', '동', '남동', '남', '남서', '서', '북서'][Math.round(((deg % 360) / 45)) % 8] + '풍'; }
 function weatherIssues(w) {
   const c = w.current, d = w.daily, L = currentDrone().wind;
-  const sunrise = d.sunrise[0].slice(11, 16), sunset = d.sunset[0].slice(11, 16), nowHM = c.time.slice(11, 16);
+  const sunrise = d.sunrise[0].slice(11, 16), sunset = d.sunset[0].slice(11, 16), nowHM = kstNowHM();
   return {
     sunrise, sunset, nowHM,
     night: nowHM < sunrise || nowHM >= sunset,
@@ -580,6 +648,14 @@ function sheetHtml(html) { $('#sheetBody').innerHTML = html; $('#sheetBody').scr
 
 /* ───────── 판정 실행 ───────── */
 let checkSeq = 0;
+// 조용한 다시 확인: 그 사이 사용자가 다른 지점을 확인 중이면 하지 않음
+let lastRecheck = 0;
+function recheckLast() {
+  const r = lastResult;
+  if (!r || r.seq !== checkSeq || Date.now() - lastRecheck < 3000) return;
+  lastRecheck = Date.now();
+  checkAt(r.lat, r.lon, r.label || undefined, { retried: true, silent: true, acc: r.acc });
+}
 async function checkAt(lat, lon, label, opt = {}) {
   const seq = ++checkSeq;
   if (label !== '내 위치') $('#btnLocate').classList.remove('found');
@@ -587,7 +663,11 @@ async function checkAt(lat, lon, label, opt = {}) {
     sheetHtml(`<div class="verdict v-gray"><div class="ico">🔑</div><div><b>인증키가 필요합니다</b><small>config.js에 V-World 인증키를 넣어주세요.</small></div></div>`);
     return;
   }
-  if (pinMarker) pinMarker.setLatLng([lat, lon]); else pinMarker = L.marker([lat, lon]).addTo(map);
+  if (pinMarker) pinMarker.setLatLng([lat, lon]);
+  else {
+    pinMarker = L.marker([lat, lon], { bubblingMouseEvents: false }).addTo(map);
+    pinMarker.on('click', e => { if (e && e.originalEvent && L.DomEvent) L.DomEvent.stopPropagation(e); if (sheet.classList.contains('collapsed')) setCollapsed(false); });
+  }
   pinLabel(null);
   if (!opt.silent) {
     zoneGeo.clearLayers();
@@ -596,7 +676,7 @@ async function checkAt(lat, lon, label, opt = {}) {
 
   const [res, addr] = await Promise.all([analyze(lat, lon), reverseGeocode(lat, lon)]);
   if (seq !== checkSeq) return;
-  res.addr = addr; res.label = label || '';
+  res.addr = addr; res.label = label || ''; res.acc = opt.acc; res.seq = seq;
   if (label === '내 위치') setMyAddress(addr);
   LS.set('lastPoint', { lat, lon, label: label || '' });
   lastResult = res;
@@ -607,7 +687,7 @@ async function checkAt(lat, lon, label, opt = {}) {
   if (incomplete && !opt.retried) {
     // 브이월드가 잠깐 응답하지 않은 경우가 많아서 몇 초 뒤 한 번 자동으로 다시 확인
     const note = $('#recheckNote'); if (note) note.textContent = '잠시 후 자동으로 한 번 더 확인해요…';
-    setTimeout(() => { if (seq === checkSeq) checkAt(lat, lon, label, { retried: true, silent: true }); }, 4000);
+    setTimeout(() => { if (seq === checkSeq) checkAt(lat, lon, label, { retried: true, silent: true, acc: opt.acc }); }, 4000);
   }
   if (!incomplete) nationalRefresh();
   if (notamData) { updateNotamButton(); autoOpenNotams(); }
@@ -617,7 +697,13 @@ async function checkAt(lat, lon, label, opt = {}) {
     if (seq !== checkSeq) return;
     res.wx = w;
     showWeather(res);
-  }).catch(() => { const box = $('#wxBox'); if (box) box.innerHTML = '<p class="muted small">날씨 정보를 불러오지 못했습니다.</p>'; });
+  }).catch(() => {
+    if (seq !== checkSeq) return;
+    const st = sunTimesKST(lat, lon), nowHM = kstNowHM();
+    const box = $('#wxBox');
+    if (box) box.innerHTML = `<div class="section-title">현재 날씨</div><p class="muted small">날씨 정보를 불러오지 못했습니다. 바람·비는 직접 확인하세요. (오늘 일출 ${st.sunrise} · 일몰 ${st.sunset}, 휴대폰에서 계산)</p>`;
+    applyWeatherToVerdict(res, { sunrise: st.sunrise, sunset: st.sunset, nowHM, night: nowHM < st.sunrise || nowHM >= st.sunset });
+  });
 }
 
 function showWeather(r) {
@@ -646,7 +732,7 @@ function applyWeatherToVerdict(r, iss) {
     r.verdict = Object.assign({}, v, {
       cls: 'v-yellow', ico: iss.night ? '🌙' : '🌬️',
       title: `공역은 ${v.code === 'ok' ? '비행 가능' : '주의'} · 지금은 ${iss.night ? '야간' : '비행 부적합'}`,
-      desc: `${what} — ${reason} ${iss.night ? `일출(${iss.sunrise}) 이후 비행하세요.` : '날씨가 좋아진 뒤 비행하세요.'}${v.nearNote ? ' 참고로 ' + v.nearNote : ''}`,
+      desc: `${what} — ${reason} ${iss.night ? `일출(${iss.sunrise}) 이후 비행하세요.` : '날씨가 좋아진 뒤 비행하세요.'}${v.code === 'caution' ? ' 공역: ' + v.desc : v.nearNote ? ' 참고로 ' + v.nearNote : ''}`,
       code: v.code, now: 'bad'
     });
   } else {
@@ -666,7 +752,7 @@ function pinLabel(r) {
   if (r) {
     const v = r.verdict, top = r.inside.filter(x => x.zone.level > 0).sort((a, b) => b.zone.level - a.zone.level)[0];
     const ua = r.inside.find(x => x.zone.id === 'LT_C_AISUAC');
-    t1 = top ? top.zone.name.replace(/\(항공고시보\)$/, ' (항공고시보)') : ua ? '초경량비행장치 공역' : '비행금지·제한 구역 아님';
+    t1 = top ? top.zone.name.replace(/\(항공고시보\)$/, ' (항공고시보)') : (v.code === 'partial' || v.code === 'error') ? '공역 확인 불완전' : ua ? '초경량비행장치 공역' : '비행금지·제한 구역 아님';
     t2 = PIN_SHORT[v.code] || v.title;
     if (v.now === 'bad') t2 += v.ico === '🌙' ? ' · 지금은 야간' : ' · 지금은 날씨 나쁨';
     const near = r.nearby.find(x => x.dist > 0 && x.dist < 1000 && x.zone.level >= 2);
@@ -705,6 +791,7 @@ function renderResult(r) {
       <button class="btn sm" id="btnCopy">📋 좌표·주소 복사</button>
       <a class="btn sm" href="https://drone.onestop.go.kr" target="_blank" rel="noopener">드론원스톱</a>
     </div>`;
+  if (isMe && r.acc > 300) h += `<p class="acc-warn">📍 위치 오차가 약 ${fmtDist(r.acc)}예요. 휴대폰 설정에서 <b>정확한 위치</b>(GPS)를 켜면 판정이 정확해져요. 경계 근처라면 지도에서 직접 지점을 눌러 확인하세요.</p>`;
   if (r.inside.length) h += `<div class="section-title">이 지점이 속한 공역</div>` + r.inside.map(x => zoneRow(x, false)).join('');
   const near = r.nearby.slice(0, 6);
   if (near.length) h += `<div class="section-title">반경 ${fmtDist(CFG.CHECK_RADIUS_M)} 내 주의 공역</div>` + near.map(x => zoneRow(x, true)).join('');
@@ -776,14 +863,15 @@ function locateMe(opt = {}) {
     const z = opt.keepView ? map.getZoom() : Math.max(map.getZoom(), 14);
     setViewVisible([lat, lon], z);
     // 결과 창이 다 그려진 뒤, 내 위치를 보이는 지도 영역의 정중앙에 한 번 더 맞춤
-    Promise.resolve(checkAt(lat, lon, '내 위치')).then(() => setTimeout(() => {
+    Promise.resolve(checkAt(lat, lon, '내 위치', { acc: accuracy })).then(() => setTimeout(() => {
       if (!$('#tab-map').classList.contains('active')) return;
+      if (!lastResult || lastResult.lat !== lat || lastResult.lon !== lon) return; // 그 사이 다른 지점을 눌렀으면 옮기지 않음
       lastSheetH = sheet.offsetHeight || lastSheetH;
       setViewVisible([lat, lon], map.getZoom());
     }, 80));
   }, err => {
     fab.classList.remove('locating', 'found');
-    if (opt.fallback) { checkAt(opt.fallback.lat, opt.fallback.lon, opt.fallback.label); return; }
+    if (opt.fallback) { checkAt(opt.fallback.lat, opt.fallback.lon, opt.fallback.label === '내 위치' ? '마지막으로 확인한 내 위치' : opt.fallback.label); return; }
     toast(err.code === 1 ? '위치 권한이 거부되었습니다. 브라우저 설정에서 허용해 주세요.' : '위치를 가져오지 못했습니다.');
   }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 });
 }
@@ -845,7 +933,7 @@ function addFavorite(r) {
   if (!name) return;
   const favs = LS.get('favorites', []);
   favs.unshift({ name, lat: r.lat, lon: r.lon });
-  LS.set('favorites', favs.slice(0, 50));
+  if (!LS.set('favorites', favs.slice(0, 50))) return toast('저장 공간이 부족해 장소를 저장하지 못했습니다.');
   toast('장소를 저장했습니다. 검색창을 누르면 볼 수 있어요.');
 }
 function goTo(lat, lon, name) {
@@ -960,7 +1048,7 @@ $('#logForm').addEventListener('submit', e => {
   const i = logs.findIndex(l => l.id === rec.id);
   if (i >= 0) logs[i] = rec; else logs.push(rec);
   logs.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  LS.set('flights', logs);
+  if (!LS.set('flights', logs)) { toast('저장 공간이 부족해 기록을 저장하지 못했습니다. 백업 후 오래된 기록을 지워 주세요.', 5000); return; }
   $('#logModal').classList.add('hidden');
   toast('비행 기록을 저장했습니다.');
   renderLogs();
@@ -1007,7 +1095,7 @@ function download(name, text, type) {
 $('#btnCsv').addEventListener('click', () => {
   const logs = LS.get('flights', []);
   if (!logs.length) return toast('내보낼 기록이 없습니다.');
-  const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  const q = v => { let t = String(v == null ? '' : v); if (typeof v === 'string' && /^[=+\-@\t\r]/.test(t)) t = "'" + t; return '"' + t.replace(/"/g, '""') + '"'; };
   const head = ['일시', '장소', '위도', '경도', '판정', '기체', '비행시간(분)', '최대고도(m)', '배터리(개)', '메모'];
   const rows = logs.map(l => [l.date && l.date.replace('T', ' '), l.place, l.lat, l.lng, l.verdict && l.verdict.title, l.drone, l.minutes, l.alt, l.batteries, l.memo].map(q).join(','));
   download(`비행기록_${toLocalInput(new Date()).slice(0, 10)}.csv`, '\uFEFF' + [head.map(q).join(',')].concat(rows).join('\r\n'), 'text/csv;charset=utf-8');
@@ -1021,12 +1109,22 @@ $('#fileRestore').addEventListener('change', async e => {
   try {
     const data = JSON.parse(await file.text());
     if (!Array.isArray(data.flights)) throw new Error();
+    const str = v => v == null ? '' : String(v).slice(0, 500);
+    const numOrNull = v => v == null || v === '' || !isFinite(+v) ? null : +v;
+    const cleanFlight = x => x && typeof x === 'object' ? {
+      id: str(x.id) || String(Date.now() + Math.random()), date: str(x.date), place: str(x.place), drone: str(x.drone),
+      minutes: numOrNull(x.minutes), alt: numOrNull(x.alt), batteries: numOrNull(x.batteries), memo: str(x.memo),
+      lat: numOrNull(x.lat), lng: numOrNull(x.lng),
+      verdict: x.verdict && typeof x.verdict === 'object' ? { code: str(x.verdict.code), title: str(x.verdict.title), cls: /^v-(red|orange|yellow|green|gray)$/.test(x.verdict.cls) ? x.verdict.cls : 'v-gray' } : null
+    } : null;
     const cur = LS.get('flights', []), ids = new Set(cur.map(x => x.id));
-    const merged = cur.concat(data.flights.filter(x => x && !ids.has(x.id))).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-    LS.set('flights', merged);
+    const incoming = data.flights.map(cleanFlight).filter(x => x && !ids.has(x.id));
+    const merged = cur.concat(incoming).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    if (!LS.set('flights', merged)) throw new Error('space');
     if (Array.isArray(data.favorites)) {
       const favs = LS.get('favorites', []), keys = new Set(favs.map(f => f.name + f.lat + f.lon));
-      LS.set('favorites', favs.concat(data.favorites.filter(f => f && !keys.has(f.name + f.lat + f.lon))));
+      const cleanFav = f => f && isFinite(+f.lat) && isFinite(+f.lon) ? { name: str(f.name) || '저장한 장소', lat: +f.lat, lon: +f.lon } : null;
+      LS.set('favorites', favs.concat(data.favorites.map(cleanFav).filter(f => f && !keys.has(f.name + f.lat + f.lon))).slice(0, 50));
     }
     toast(`기록 ${merged.length - cur.length}건을 불러왔습니다.`); renderLogs();
   } catch (err) { toast('백업 파일을 읽을 수 없습니다.'); }
@@ -1112,7 +1210,8 @@ function parseScheduleRaw(it) {
   const s = (it.schedule || '').toUpperCase().replace(/\s+/g, ' ').trim();
   if (!s) return 'always';
   const now = new Date();
-  let month = it.start ? new Date(it.start).getUTCMonth() + 1 : now.getUTCMonth() + 1, lastDay = 0;
+  let month = it.start ? new Date(it.start).getUTCMonth() + 1 : now.getUTCMonth() + 1;
+  let lastDay = it.start ? new Date(it.start).getUTCDate() : 0; // 첫 날짜가 시작일보다 앞이면 다음 달
   const wins = [];
   let days = [], times = [];
   const flush = () => {
@@ -1153,7 +1252,17 @@ function parseScheduleRaw(it) {
     else return null; // SR-SS, MON-FRI, EXC, H24 등 → 해석 불가 → 안전하게 '활성'으로 취급
   }
   flush();
-  return wins.length ? wins : null;
+  if (!wins.length) return null;
+  if (it.start && it.end && wins.some(w => w.days)) {
+    const s0 = Date.parse(it.start), e0 = Date.parse(it.end);
+    let hit = !wins.every(w => w.days);
+    for (let t = s0 - 864e5; !hit && t <= e0 + 864e5 && t - s0 < 400 * 864e5; t += 864e5) {
+      const d = new Date(t), m = d.getUTCMonth() + 1, dd = d.getUTCDate();
+      hit = wins.some(w => w.days && w.days.some(x => x[0] === m && x[1] === dd));
+    }
+    if (!hit) return null;
+  }
+  return wins;
 }
 const schedHasDay = (w, m, d) => !w.days || w.days.some(x => x[0] === m && x[1] === d);
 function schedOn(wins, now) {
@@ -1236,13 +1345,22 @@ function notamFeature(it) {
     번호: it.no, 기간: notamPeriod(it), 활성시간: scheduleText(it), 고도: notamAlt(it), 내용: it.text } };
 }
 async function loadNotams() {
-  for (const u of NOTAM_URLS) {
-    try {
-      const r = await fetch(u + '?t=' + Date.now(), { cache: 'no-store' });
-      if (r.ok) { const d = await r.json(); if (d && Array.isArray(d.items)) { notamData = d; break; } }
-    } catch (e) {}
+  let got = null;
+  for (const wait of [0, 3000, 10000, 30000]) { // 실패하면 3초·10초·30초 뒤 다시
+    if (wait) await new Promise(r => setTimeout(r, wait));
+    for (const u of NOTAM_URLS) {
+      try {
+        const r = await fetchT(u + '?t=' + Date.now(), { cache: 'no-store' }, 10000);
+        if (r.ok) { const d = await r.json(); if (d && Array.isArray(d.items)) { got = d; break; } }
+      } catch (e) {}
+    }
+    if (got) break;
   }
-  if (!notamData) return;
+  if (!got) return;
+  const wasMissing = !notamData;
+  notamData = got;
+  // 판정이 항공고시보 없이 먼저 나갔다면 조용히 다시 판정
+  if (wasMissing && lastResult && lastResult.notamMissing) recheckLast();
   drawNotams();
   updateNotamButton();
   if (lastResult) autoOpenNotams();
@@ -1345,6 +1463,13 @@ $('#btnNotamClose').addEventListener('click', closeNotamModal);
 $('#notamModal').addEventListener('click', e => { if (e.target.id === 'notamModal') closeNotamModal(); });
 $('#btnNotam').addEventListener('click', () => { if (notamData) { notamShowAll = false; openNotamModal(); } });
 const notamReady = loadNotams();
+let hiddenAt = 0;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { hiddenAt = Date.now(); return; }
+  if (!hiddenAt || Date.now() - hiddenAt < 600e3) return;
+  hiddenAt = 0;
+  loadNotams().then(recheckLast);
+});
 
 /* ───────── 새로고침 시 이전 상태 복원 ───────── */
 (function restore() {
@@ -1354,7 +1479,7 @@ const notamReady = loadNotams();
   if (v && isFinite(v.lat) && isFinite(v.lng)) map.setView([v.lat, v.lng], v.z || CFG.DEFAULT_ZOOM, { animate: false });
   const lp = LS.get('lastPoint', null);
   if (lp && vkey()) {
-    if (lp.label === '내 위치') locateMe({ quiet: true, fallback: lp, keepView: !!v });
+    if (lp.label === '내 위치' || lp.label === '마지막으로 확인한 내 위치') locateMe({ quiet: true, fallback: Object.assign({}, lp, { label: '내 위치' }), keepView: !!v });
     else checkAt(lp.lat, lp.lon, lp.label);
   }
 })();
@@ -1366,6 +1491,114 @@ function renderMapLegend() {
     .map(z => `<li>${swatch(z)}<span>${esc(z.name)} <span class="muted">— ${esc(z.note)}</span></span></li>`).join('');
 }
 renderMapLegend();
+
+/* ───────── 연결 점검: 인증키와 외부 서버를 실제로 시험 ───────── */
+function diagVW(path, params, domain) {
+  const p = Object.assign({ key: vkey(), format: 'json', errorFormat: 'json' }, params);
+  if (domain !== null) p.domain = domain === undefined ? location.origin : domain;
+  return jsonpRaw('https://api.vworld.kr/req/' + path, p, 8000).then(res => {
+    const r = res && res.response;
+    if (!r) throw new Error('응답 형식이 이상함');
+    if (r.status === 'OK' || r.status === 'NOT_FOUND') return r;
+    const er = r.error || {};
+    throw new Error([er.code, er.text].filter(Boolean).join(' · ') || r.status);
+  });
+}
+function diagImg(url, ms = 8000) {
+  return new Promise((ok, bad) => {
+    const im = new Image(), t = setTimeout(() => { im.src = ''; bad(new Error('시간 초과')); }, ms);
+    im.onload = () => { clearTimeout(t); im.naturalWidth > 0 ? ok(im.naturalWidth + 'px 이미지') : bad(new Error('빈 이미지')); };
+    im.onerror = () => { clearTimeout(t); bad(new Error('이미지가 아님(인증키 거부·서버 오류 가능)')); };
+    im.src = url;
+  });
+}
+async function runDiag() {
+  const out = $('#diagOut'), btn = $('#btnDiag'), rows = [];
+  btn.disabled = true; btn.textContent = '점검 중…'; $('#btnDiagCopy').classList.add('hidden');
+  const render = () => {
+    out.innerHTML = rows.map(r => `<li class="${r.ok === true ? 'ok' : r.ok === false ? 'bad' : 'warn'}"><span>${r.ok === true ? '✅' : r.ok === false ? '❌' : '⚠️'}</span><b>${esc(r.name)}</b><small>${esc(r.detail || '')}${r.ms != null ? ` · ${r.ms}ms` : ''}</small></li>`).join('');
+    const bad = rows.filter(r => r.ok === false).length, warn = rows.filter(r => r.ok === 'warn').length;
+    $('#diagSum').innerHTML = `<b>${bad ? `❌ 문제 ${bad}개` : '✅ 문제 없음'}</b>${warn ? ` · ⚠️ 주의 ${warn}개` : ''} · 항목 ${rows.length}개`;
+  };
+  const add = (ok, name, detail, ms) => { rows.push({ ok, name, detail, ms }); render(); };
+  const step = async (name, fn, judge) => {
+    const t0 = Date.now();
+    try { const v = await fn(); const j = judge ? judge(v) : [true, String(v == null ? '' : v)]; add(j[0], name, j[1], Date.now() - t0); return v; }
+    catch (e) { add(false, name, (e && e.message) || String(e), Date.now() - t0); return undefined; }
+  };
+  try {
+    // 1) 사용 환경
+    const ua = navigator.userAgent;
+    const where = /KAKAOTALK/i.test(ua) ? '카카오톡 안 브라우저' : /NAVER\(inapp/i.test(ua) ? '네이버 앱 안 브라우저' : window.NFZApp ? '안드로이드 앱' : /SamsungBrowser/i.test(ua) ? '삼성 인터넷' : /Chrome/i.test(ua) ? '크롬' : /Safari/i.test(ua) ? '사파리' : '기타 브라우저';
+    const inApp = /KAKAOTALK|NAVER\(inapp|Instagram|FBAN|FBAV|Line\//i.test(ua);
+    add(inApp ? 'warn' : true, '사용 환경', `${where} · ${($('.appbar .badge') || {}).textContent || ''} · 주소 ${location.origin}${location.pathname}` + (inApp ? ' — 메신저 안 브라우저는 브이월드가 인증키를 거부하기도 해요. 삼성 인터넷·크롬·앱에서 열어 보세요.' : ''));
+    // 2) 인증키 형식
+    const key = vkey();
+    const keyOk = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i.test(key);
+    add(keyOk, '인증키 형식', key ? `${key.slice(0, 4)}…${key.slice(-4)} (${key.length}자)${keyOk ? '' : ' — 형식이 올바르지 않아요'}` : '인증키가 없어요');
+    if (!key) return;
+    const [lat, lon] = lastResult ? [lastResult.lat, lastResult.lon] : [map.getCenter().lat, map.getCenter().lng];
+    const bbox = bboxAround(lat, lon, CFG.CHECK_RADIUS_M);
+    add(true, '점검 기준 지점', `${lat.toFixed(4)}, ${lon.toFixed(4)} (${lastResult ? '마지막으로 확인한 지점' : '지도 중심'})`);
+    const dataParams = id => ({ service: 'data', request: 'GetFeature', version: '2.0', data: id, size: '1000', page: '1', geometry: 'false', attribute: 'true', crs: 'EPSG:4326', geomFilter: `BOX(${bbox.join(',')})` });
+    // 3) 공역 자료(데이터 API) — 층마다 한 번씩, 순서대로
+    for (const z of ZONES.filter(z => !z.optional || verified.has(z.id))) {
+      await step(`공역 자료 · ${z.name}`, () => diagVW('data', dataParams(z.id)),
+        r => [true, r.status === 'NOT_FOUND' ? '정상 (주변에 없음)' : `정상 (${((r.result && r.result.featureCollection && r.result.featureCollection.features) || []).length}건)`]);
+    }
+    // 3-1) 실제 판정과 같은 방식(구역 모양 포함, 동시에 4개씩)으로 한 번
+    await step('실제 판정 방식 (모양 포함·동시 요청)', async () => {
+      const zs = ZONES.filter(z => !z.optional);
+      const res = await Promise.allSettled(zs.map(z => queryLayerOnce(z, bbox)));
+      const bad = res.map((r, i) => r.status === 'rejected' ? `${zs[i].name}: ${r.reason && r.reason.message}` : '').filter(Boolean);
+      if (bad.length) throw new Error(`${zs.length}개 중 ${bad.length}개 실패 — ${bad.join(' / ')}`);
+      return `${zs.length}개 모두 정상`;
+    });
+    // 4) 같은 요청을 5번 — 가끔만 실패하는지 확인
+    let okN = 0; const errs = new Set(); const t0 = Date.now();
+    for (let i = 0; i < 5; i++) { try { await diagVW('data', dataParams('LT_C_AISPRHC')); okN++; } catch (e) { errs.add(e.message); } }
+    add(okN === 5 ? true : okN ? 'warn' : false, '반복 요청 안정성 (비행금지구역 5회)', `${okN}/5 성공${errs.size ? ' · 실패 원인: ' + [...errs].join(' / ') : ''}`, Date.now() - t0);
+    // 5) domain 값 형식별로 인증키가 받아들여지는지
+    const variants = [['지금 방식', location.origin], ['경로 포함', location.origin + '/nfz/'], ['주소만', location.host], ['domain 없음', null]];
+    const vr = [];
+    for (const [nm, d] of variants) { try { await diagVW('data', dataParams('LT_C_AISUAC'), d); vr.push(`${nm} ✅`); } catch (e) { vr.push(`${nm} ❌(${e.message})`); } }
+    add(vr[0].includes('✅') ? true : false, '인증키 도메인 확인', vr.join(' · '));
+    // 6) 주소·검색 API
+    await step('주소 찾기 (좌표→주소)', () => diagVW('address', { service: 'address', request: 'getAddress', version: '2.0', crs: 'epsg:4326', point: `${lon},${lat}`, type: 'both' }),
+      r => { const x = r.result && r.result[0]; return [true, x ? x.text : '정상 (주소 없음)']; });
+    await step('장소 검색', () => diagVW('search', { service: 'search', request: 'search', version: '2.0', crs: 'EPSG:4326', size: '1', page: '1', query: '서울시청', type: 'place' }),
+      r => [true, r.status === 'OK' ? `정상 (${(r.result && r.result.items && r.result.items[0] && r.result.items[0].title) || '결과 있음'})` : '정상 (결과 없음)']);
+    // 7) 지도 그림(배경지도 WMTS, 공역 WMS)
+    await step('배경지도 그림', () => diagImg(`https://api.vworld.kr/req/wmts/1.0.0/${key}/Base/7/49/109.png`));
+    const m = (x, y) => [x * 20037508.34 / 180, Math.log(Math.tan((90 + y) * Math.PI / 360)) * 20037508.34 / Math.PI];
+    const [x1, y1] = m(126.9, 37.5), [x2, y2] = m(127.05, 37.65);
+    await step('공역 지도 그림 (비행금지구역)', () => diagImg('https://api.vworld.kr/req/wms?' + new URLSearchParams({
+      service: 'WMS', request: 'GetMap', version: '1.3.0', layers: 'lt_c_aisprhc', styles: 'lt_c_aisprhc', crs: 'EPSG:3857',
+      bbox: [x1, y1, x2, y2].map(v => v.toFixed(1)).join(','), width: '256', height: '256', format: 'image/png', transparent: 'true', key, domain: location.origin })));
+    // 8) 날씨·지자기·항공고시보
+    await step('날씨 (Open-Meteo)', async () => { const r = await fetchT(`https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}&current=wind_speed_10m&wind_speed_unit=ms`, {}, 12000); if (!r.ok) throw new Error('HTTP ' + r.status); const j = await r.json(); return j.current; },
+      c => [true, `정상 (풍속 ${c.wind_speed_10m}m/s)`]);
+    await step('지자기 Kp (NOAA)', () => { kpCache = null; return fetchKp(); }, v => [true, `정상 (Kp ${v.now})`]);
+    await step('항공고시보 자료', async () => { const r = await fetchT(NOTAM_URLS[0] + '?t=' + Date.now(), { cache: 'no-store' }, 12000); if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); },
+      d => { const age = d.fetchedAtUTC ? (Date.now() - Date.parse(d.fetchedAtUTC)) / 3600e3 : 99; return [age > 8 ? 'warn' : true, `${(d.items || []).length}건 · ${d.fetchedAtUTC ? fmtKST(d.fetchedAtUTC) + ' 받음' : '받은 시각 모름'}${age > 8 ? ' — 자동 갱신이 멈췄을 수 있어요' : ''}`]; });
+    // 9) 휴대폰 저장 공간·저장된 전국 자료
+    let bytes = 0; const nat = [];
+    try { for (const k of Object.keys(localStorage)) { const v = localStorage.getItem(k) || ''; bytes += (k.length + v.length) * 2; if (k.startsWith('nat:')) { const c = JSON.parse(v); nat.push(`${(ZONES.find(z => z.id === k.slice(4)) || {}).name || k} ${c.f.length}건(${new Date(c.t).getMonth() + 1}/${new Date(c.t).getDate()})`); } } } catch (e) {}
+    add(bytes > 4e6 ? 'warn' : true, '휴대폰 저장 공간', `${(bytes / 1024).toFixed(0)}KB 사용 · 비행 기록 ${LS.get('flights', []).length}건 · 저장된 전국 공역: ${nat.join(', ') || '없음'}`);
+    // 10) 오프라인용 화면 저장(서비스 워커)
+    add(true, '화면 저장(오프라인)', 'serviceWorker' in navigator ? (navigator.serviceWorker.controller ? '사용 중' : '아직 준비 안 됨 (한 번 더 열면 켜져요)') : '이 브라우저는 지원 안 함');
+  } finally {
+    btn.disabled = false; btn.textContent = '다시 점검';
+    $('#btnDiagCopy').classList.remove('hidden');
+  }
+}
+$('#btnDiag').addEventListener('click', runDiag);
+$('#btnDiagCopy').addEventListener('click', async () => {
+  const text = ['[하코 NFZ 연결 점검] ' + new Date().toLocaleString('ko-KR'), $('#diagSum').textContent]
+    .concat($$('#diagOut li').map(li => `${li.querySelector('span').textContent} ${li.querySelector('b').textContent} — ${li.querySelector('small').textContent}`)).join('\n');
+  try { await navigator.clipboard.writeText(text); toast('점검 결과를 복사했습니다.'); }
+  catch (e) { if (window.NFZApp && window.NFZApp.share) window.NFZApp.share(text); else prompt('아래 내용을 복사하세요', text); }
+});
 
 /* ───────── 앱에서 실행 중이면 배지를 '앱버전'으로 ───────── */
 if (window.NFZApp) {
@@ -1380,5 +1613,5 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
 }
 
 // 테스트용 노출
-window.__dz = { nationalGet, containsPoint, distToBoundary, makeVerdict, ZONES, hiddenZones, overlayZone, drawZones, notamStatus, scheduleText, scheduleState, kstDayWindows, get notamData() { return notamData; } };
+window.__dz = { runDiag, sunTimesKST, nationalGet, containsPoint, distToBoundary, makeVerdict, ZONES, hiddenZones, overlayZone, drawZones, notamStatus, scheduleText, scheduleState, kstDayWindows, get notamData() { return notamData; } };
 })();
