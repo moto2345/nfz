@@ -448,7 +448,7 @@ const WX = { 0: '맑음', 1: '대체로 맑음', 2: '구름 조금', 3: '흐림'
 async function fetchWeather(lat, lon) {
   const u = 'https://api.open-meteo.com/v1/forecast?' + new URLSearchParams({
     latitude: lat.toFixed(4), longitude: lon.toFixed(4),
-    current: 'temperature_2m,precipitation,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl',
+    current: 'temperature_2m,precipitation,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl,wind_speed_120m',
     hourly: 'precipitation_probability,precipitation', forecast_hours: '3',
     daily: 'sunrise,sunset', timezone: 'Asia/Seoul', wind_speed_unit: 'ms', forecast_days: '1'
   });
@@ -456,7 +456,7 @@ async function fetchWeather(lat, lon) {
   if (!r.ok) throw new Error('날씨 오류');
   const w = await r.json();
   w.kp = kp;
-  if (w.current) setPRef(w.current, lat, lon); // 기압계 고도 계산 기준으로도 씀
+  if (w.current) { setPRef(w.current, lat, lon); setHudWx(w.current, lat, lon); } // 기압계 고도 기준·계기판 바람/기온으로도 씀
   if (kp) updateKpBadge(kp);
   return w;
 }
@@ -1039,18 +1039,30 @@ function updateHud(c, t) {
 }
 /* 고도: 기압계가 있는 폰(안드로이드 앱)은 기압계 + 그 지역 해면기압(Open-Meteo)으로 계산 — GPS보다 훨씬 덜 흔들림.
    없으면 GPS 고도. GPS 고도는 타원체 기준이라 우리나라에선 해발보다 20~30m 높게 나오므로, 앱(안드로이드 14+)이 알려 주는 지오이드 높이만큼 뺌 */
-let gpsAlt = null, lastPos = null, baroHpa = null, geoidN = null, pRef = null, pRefBusy = false, pRefTry = 0;
+let gpsAlt = null, lastPos = null, baroHpa = null, geoidN = null, pRef = null;
 function setPRef(cur, lat, lon) {
   if (!(cur.pressure_msl > 900 && cur.pressure_msl < 1100)) return;
   pRef = { p0: cur.pressure_msl, tC: isFinite(cur.temperature_2m) ? cur.temperature_2m : 15, lat, lon, t: Date.now() };
 }
 function pRefOk(pos) { return pRef && Date.now() - pRef.t < 3 * 3600e3 && (!pos || distM(pos, [pRef.lat, pRef.lon]) < 30000); }
-async function fetchPRef(lat, lon) {
-  if (pRefBusy) return; pRefBusy = true; pRefTry = Date.now();
+// 계기판용 날씨(해면기압·바람·기온): 결과창 날씨를 받을 때 같이 저장하고, 15분 넘었거나 5km 넘게 이동하면 따로 가볍게 받음(1분에 한 번까지)
+let hudWx = null, hudWxBusy = false, hudWxTry = 0;
+function setHudWx(cur, lat, lon) {
+  if (!cur || !isFinite(cur.wind_speed_10m)) return;
+  hudWx = { ws: cur.wind_speed_10m, wg: cur.wind_gusts_10m, wu: cur.wind_speed_120m, tC: cur.temperature_2m, lat, lon, t: Date.now() };
+}
+const hudWxOk = pos => hudWx && Date.now() - hudWx.t < 15 * 60e3 && (!pos || distM(pos, [hudWx.lat, hudWx.lon]) < 5000);
+async function fetchHudWx(lat, lon) {
+  if (hudWxBusy) return; hudWxBusy = true; hudWxTry = Date.now();
   try {
-    const r = await fetchT('https://api.open-meteo.com/v1/forecast?' + new URLSearchParams({ latitude: lat.toFixed(3), longitude: lon.toFixed(3), current: 'pressure_msl,temperature_2m' }), {}, 10000);
-    if (r.ok) { const j = await r.json(); if (j.current) setPRef(j.current, lat, lon); }
-  } catch (e) {} finally { pRefBusy = false; }
+    const r = await fetchT('https://api.open-meteo.com/v1/forecast?' + new URLSearchParams({ latitude: lat.toFixed(3), longitude: lon.toFixed(3),
+      current: 'pressure_msl,temperature_2m,wind_speed_10m,wind_gusts_10m,wind_speed_120m', wind_speed_unit: 'ms' }), {}, 10000);
+    if (r.ok) { const j = await r.json(); if (j.current) { setPRef(j.current, lat, lon); setHudWx(j.current, lat, lon); renderAlt(); renderHudExtra(); } }
+  } catch (e) {} finally { hudWxBusy = false; }
+}
+function hudWxNeed() {
+  if (!lastPos || hudWxBusy || Date.now() - hudWxTry < 60e3) return;
+  if (!hudWxOk(lastPos) || (baroHpa != null && !pRefOk(lastPos))) fetchHudWx(lastPos[0], lastPos[1]);
 }
 function baroAltitude(p) { // 측고 공식(현지 기온 반영)
   return (Math.pow(pRef.p0 / p, 1 / 5.257) - 1) * (pRef.tC + 273.15) / 0.0065;
@@ -1061,13 +1073,70 @@ function renderAlt() {
   let h = null, src = '';
   if (baroHpa != null) {
     if (pRefOk(lastPos)) { h = baroAltitude(baroHpa); src = '기압'; }
-    else if (lastPos && !pRefBusy && Date.now() - pRefTry > 60e3) fetchPRef(lastPos[0], lastPos[1]); // 1분에 한 번까지만 시도
+    else hudWxNeed();
   }
   if (h == null && gpsAlt != null) { h = gpsAlt - (geoidN || 0); src = 'GPS'; }
   if (h == null) { $('#hudAlt').textContent = '-'; $('#hudAltSrc').textContent = ''; return; }
   const txt = src === '기압' ? h.toFixed(1) : String(Math.round(h)); // 기압은 소수점 한 자리, GPS는 정수
   $('#hudAlt').textContent = `${/^-0(\.0)?$/.test(txt) ? txt.slice(1) : txt} m`; // '-0.0' 대신 '0.0'
   $('#hudAltSrc').textContent = src;
+}
+/* 계기판 추가 정보: 일몰(일출)까지 · 바람(지상/120m 상공) · 기온(배터리) · 가까운 제한구역 */
+const fmtMin = m => m < 60 ? `${m}분` : `${Math.floor(m / 60)}시간 ${m % 60}분`;
+function sunLeft(lat, lon) { // 한국시간 기준, 휴대폰에서 계산
+  const st = sunTimesKST(lat, lon), toMin = t => +t.slice(0, 2) * 60 + +t.slice(3, 5);
+  const now = toMin(kstNowHM()), rise = toMin(st.sunrise), set = toMin(st.sunset);
+  if (now >= rise && now < set) return { night: false, min: set - now };
+  return { night: true, min: (now < rise ? rise : rise + 1440) - now };
+}
+// 받아 둔 공역 모양으로 지금 위치에서 가장 가까운 '승인 필요 이상' 구역 계산 (서버 조회 없음)
+function nearZone(lat, lon) {
+  const c = zoneCache;
+  if (!c || Date.now() - c.t > 60 * 60e3) return null;
+  const reach = CFG.CHECK_RADIUS_M - distM([c.lat, c.lon], [lat, lon]); // 이 거리 안의 구역은 모두 받아 둔 상태
+  if (reach < 500) return null;
+  let inside = null, near = null;
+  const see = (zone, g) => {
+    if (!g || zone.level < 2) return;
+    if (containsPoint(g, lon, lat)) { if (!inside || zone.level > inside.level) inside = zone; return; }
+    const d = distToBoundary(g, lon, lat);
+    if (d <= reach && (!near || d < near.d)) near = { zone, d };
+  };
+  c.settled.forEach((x, i) => { if (x.status === 'fulfilled') for (const f of x.value) see(ZONES[i], f.geometry); });
+  for (const it of notamList()) if (it.geometry && notamStatus(it) === 'active') see(notamZone(it, 'active'), it.geometry);
+  return { inside, near, reach };
+}
+const shortZone = z => z.name.replace(/\(.*\)$/, '');
+function hudRow(id, html, cls) {
+  const row = $('#' + id + 'Row'), el = $('#' + id);
+  row.classList.toggle('hidden', html == null);
+  if (html == null) return;
+  el.innerHTML = html; el.className = cls || '';
+}
+function renderHudExtra() {
+  if (!lastPos) return;
+  const [lat, lon] = lastPos;
+  // 일몰까지 (야간이면 일출까지)
+  const s = sunLeft(lat, lon);
+  $('#hudSunLbl').textContent = s.night ? '야간·일출까지' : '일몰까지';
+  hudRow('hudSun', fmtMin(s.min), s.night ? 'q-bad' : s.min <= 10 ? 'q-bad' : s.min <= 30 ? 'q-mid' : 'q-good');
+  // 바람·기온 (예보 모델 값) — 색은 고른 기체의 내풍 한계 기준(결과창 강풍 판정과 같음)
+  hudWxNeed();
+  const w = hudWxOk(lastPos) ? hudWx : null, L = currentDrone().wind;
+  if (w) {
+    const strong = w.wg >= L || w.ws >= L * 0.75, mid = w.wg >= L * 0.65 || w.ws >= L * 0.5;
+    hudRow('hudWind', `${w.ws.toFixed(1)} m/s`, strong ? 'q-bad' : mid ? 'q-mid' : 'q-good');
+    hudRow('hudWindUp', isFinite(w.wu) ? `${w.wu.toFixed(1)} m/s` : null, w.wu >= L * 0.75 ? 'q-bad' : w.wu >= L * 0.5 ? 'q-mid' : 'q-good');
+    const t = Math.round(w.tC);
+    hudRow('hudTemp', isFinite(w.tC) ? `${t}℃` + (t < 10 ? ' <small>배터리 주의</small>' : t >= 35 ? ' <small>과열 주의</small>' : '') : null,
+      t < 0 ? 'q-bad' : t < 10 || t >= 35 ? 'q-mid' : '');
+  } else ['hudWind', 'hudWindUp', 'hudTemp'].forEach(id => hudRow(id, null));
+  // 가장 가까운 제한구역 (비행승인 필요 이상)
+  const z = nearZone(lat, lon);
+  if (!z) hudRow('hudZone', '확인 중', 'q-mid');
+  else if (z.inside) hudRow('hudZone', `${esc(shortZone(z.inside))} 안`, 'q-bad');
+  else if (z.near) hudRow('hudZone', `${esc(shortZone(z.near.zone))} ${fmtDist(z.near.d)}`, z.near.d < 1000 ? 'q-mid' : '');
+  else hudRow('hudZone', `${fmtDist(z.reach)} 안에 없음`, 'q-good');
 }
 // GPS 오차 색: 10m 이하 초록 · 30m 이하 주황 · 그 이상 빨강
 function setAcc(a) {
@@ -1165,7 +1234,9 @@ function onTrackPos(p) {
   const dur = Math.max(0.25, Math.min(1.5, gap * 0.95)); // 위치가 오는 간격에 맞춰 이동 시간을 정함
   const jump = meMarker && distM([meMarker.getLatLng().lat, meMarker.getLatLng().lng], [lat, lon]) > 2000; // 순간이동급이면 애니메이션 없이
   if (jump || !meMarker) showMe(lat, lon, accuracy); else animateMe(lat, lon, accuracy, dur);
+  lastPos = [lat, lon];
   updateHud(p.coords, p.timestamp || now);
+  renderHudExtra();
   $('#btnLocate').classList.add('found');
   if (trackFollow && $('#tab-map').classList.contains('active')) {
     const zt = autoZoomTarget();
@@ -1198,7 +1269,8 @@ function startTrack() {
   keepAwake(true);
   compass(true); // 버튼을 누른 순간에 켜야 아이폰에서 권한을 물을 수 있음
   gpsHeading = null; prevFix = null; lastFixAt = 0;
-  trackKmh = null; autoZ = null; zCand = null; manualZoomAt = 0;
+  trackKmh = null; autoZ = null; zCand = null; manualZoomAt = 0; lastPos = null; hudWxTry = Date.now() - 50e3;
+  ['hudSun', 'hudWind', 'hudWindUp', 'hudTemp', 'hudZone'].forEach(id => $('#' + id + 'Row').classList.add('hidden'));
   $('#navHud').classList.remove('hidden');
   satPoll(true);
   trackUI();

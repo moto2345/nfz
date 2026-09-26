@@ -1,5 +1,5 @@
 // 앱 화면(껍데기)만 캐시 — 공역·날씨 데이터는 항상 새로 받아옵니다.
-const V = '50'; // index.html의 ?v= 숫자와 같게 유지
+const V = '51'; // index.html의 ?v= 숫자와 같게 유지
 const CACHE = 'dronezone-v' + V;
 const SHELL = ['./', 'manifest.webmanifest',
   'style.css?v=' + V, 'config.js?v=' + V, 'app.js?v=' + V,
