@@ -1137,7 +1137,7 @@ function followTo(latlng, dur, zWant) {
 }
 /* 속도에 맞춘 자동 축척 (내비처럼): 느리면 크게, 빠르면 넓게.
    빨라질 땐 3초, 느려질 땐 10초 이어져야 바꿈(신호 대기마다 들락날락하지 않게). 손으로 확대·축소하면 30초 동안 멈춤 */
-const AUTO_ZOOM = [[8, 16], [30, 15], [60, 14], [Infinity, 13]]; // [이 속도(km/h) 미만, 줌]
+const AUTO_ZOOM = [[8, 17], [30, 16], [60, 15], [Infinity, 14]]; // [이 속도(km/h) 미만, 줌]
 let trackKmh = null, autoZ = null, zCand = null, zCandAt = 0, manualZoomAt = 0, appZoomUntil = 0;
 function bandZoom(kmh) { for (const [lim, z] of AUTO_ZOOM) if (kmh < lim) return z; }
 function autoZoomTarget() {
