@@ -998,8 +998,8 @@ function renderHeading() {
   $('#hudArrow').style.transform = `rotate(${h || 0}deg)`;
   if (!meMarker) return;
   if (h == null) { if (headingMarker) { map.removeLayer(headingMarker); headingMarker = null; } return; }
-  const html = `<svg viewBox="0 0 44 44" style="transform:rotate(${h}deg)"><path d="M22 2 29 17H15z" fill="#1a73e8" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg>`;
-  if (!headingMarker) headingMarker = L.marker(meMarker.getLatLng(), { icon: L.divIcon({ className: 'me-heading', html, iconSize: [44, 44], iconAnchor: [22, 22] }), interactive: false, keyboard: false }).addTo(map);
+  const html = `<svg viewBox="0 0 64 64" style="transform:rotate(${h}deg)"><path d="M32 1 39.5 13H24.5z" fill="#1a73e8" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>`;
+  if (!headingMarker) headingMarker = L.marker(meMarker.getLatLng(), { icon: L.divIcon({ className: 'me-heading', html, iconSize: [64, 64], iconAnchor: [32, 32] }), interactive: false, keyboard: false }).addTo(map);
   else { headingMarker.setLatLng(meMarker.getLatLng()); const svg = headingMarker.getElement() && headingMarker.getElement().querySelector('svg'); if (svg) svg.style.transform = `rotate(${h}deg)`; }
 }
 function updateHud(c, t) {
