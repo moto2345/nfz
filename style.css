@@ -171,6 +171,29 @@ a.btn{text-decoration:none;color:var(--primary)}
 
 .toast{position:fixed;left:50%;bottom:calc(var(--tabbar-h) + var(--safe-b) + 13px);transform:translateX(-50%);background:rgba(20,24,32,.92);color:#fff;
   padding:8px 13px;border-radius:8px;font-size:11px;z-index:3000;max-width:90vw;text-align:center}
+/* 담당 연락처 카드 */
+.contacts{margin:12px 0 4px;border:1px solid var(--line);border-radius:12px;background:var(--card);overflow:hidden}
+.contacts>summary{cursor:pointer;padding:10px 12px;font-size:13px;font-weight:800;list-style:none;display:flex;align-items:center;gap:6px}
+.contacts>summary::-webkit-details-marker{display:none}
+.contacts>summary::after{content:"▾";margin-left:auto;color:var(--muted);transition:transform .2s}
+.contacts[open]>summary::after{transform:rotate(180deg)}
+.contacts>summary small{font-size:11px;font-weight:600;color:var(--muted)}
+.ct-group{padding:8px 12px 10px;border-top:1px solid var(--line)}
+.ct-title{font-size:12px;font-weight:800;margin-bottom:4px;word-break:keep-all}
+.ct-title small{display:block;font-size:10.5px;font-weight:500;color:var(--muted);margin-top:1px}
+.ct-item{padding:6px 0;border-top:1px dashed var(--line)}
+.ct-title+.ct-item{border-top:0}
+.tn{white-space:nowrap}
+.ct-area{font-size:11px;color:var(--muted);word-break:keep-all;line-height:1.45}
+.ct-org{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px;font-size:12.5px;font-weight:700;margin-top:3px;word-break:keep-all}
+.ct-org small{font-size:10.5px;font-weight:500;color:var(--muted);flex-basis:100%}
+.ct-tels{display:inline-flex;flex-wrap:wrap;gap:2px 6px;align-items:baseline}
+.ct-tels i{font-style:normal;color:var(--muted);font-weight:400}
+a.tel{color:var(--primary);text-decoration:none;border-bottom:1px solid rgba(21,101,192,.35);white-space:nowrap}
+.ct-note{font-size:10.5px;color:#b26a00;margin-top:3px;line-height:1.45;word-break:keep-all}
+.ct-link{display:inline-block;font-size:11px;margin-top:3px;color:var(--primary)}
+.ct-foot{margin:0;padding:8px 12px 10px;border-top:1px solid var(--line);font-size:10.5px;color:var(--muted);line-height:1.5;word-break:keep-all}
+.ct-misc .ct-org{padding:4px 0;border-bottom:1px dashed var(--line)}
 /* 지자기 Kp 안내 카드 */
 .kp-card{position:absolute;left:10px;right:58px;bottom:calc(var(--sheet-h,96px) + 10px);z-index:900;max-width:380px;
   max-height:calc(100% - var(--sheet-h,96px) - 76px);overflow-y:auto;background:var(--card);color:var(--text);border-radius:16px;box-shadow:0 8px 28px rgba(0,0,0,.28);padding:14px 16px 12px;

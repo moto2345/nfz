@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="하코 NFZ">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-  <link rel="stylesheet" href="style.css?v=52">
+  <link rel="stylesheet" href="style.css?v=53">
 </head>
 <body>
 
@@ -20,7 +20,7 @@
 <header class="appbar">
   <img src="icons/icon-192.png" alt="" class="appbar-logo">
   <h1>하코 NFZ 조회</h1>
-  <span class="badge">웹버전 v1.52</span>
+  <span class="badge">웹버전 v1.53</span>
   <button id="btnNotam" class="appbar-btn notam hidden" type="button" aria-label="항공고시보" title="드론 관련 항공고시보">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M10 20.5a2.2 2.2 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
     <span id="notamCount" class="cnt">0</span>
@@ -216,6 +216,12 @@
   </div>
 
   <div class="card">
+    <b>📞 장치신고·사업등록 문의</b>
+    <div id="miscContacts" class="ct-misc"><p class="muted small">불러오는 중…</p></div>
+    <p class="muted small">지도에서 지점을 누르면 결과창에 그 위치의 비행승인·특별비행·항공촬영 담당 연락처가 함께 나와요 (드론원스톱 '처리부서안내' 기준).</p>
+  </div>
+
+  <div class="card">
     <b>🧭 나침반·드론 컴퍼스 보정</b>
     <p class="small">방향이 틀리게 나오거나 드론 앱에서 컴퍼스 경고가 뜨면 보정하세요.</p>
     <div class="row-btns"><button id="btnCompassHelp2" class="btn" type="button">보정 방법 보기</button></div>
@@ -319,7 +325,7 @@
 <div id="toast" class="toast hidden"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="config.js?v=52"></script>
-<script src="app.js?v=52"></script>
+<script src="config.js?v=53"></script>
+<script src="app.js?v=53"></script>
 </body>
 </html>

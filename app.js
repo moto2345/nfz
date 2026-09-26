@@ -887,6 +887,128 @@ function zoneRow(x, showDist) {
     ${showDist ? `<div class="z-dist">${x.dist === 0 ? '이 지점' : fmtDist(x.dist)}</div>` : ''}</div>`;
 }
 
+/* ───────── 담당 연락처 (드론원스톱 '처리부서안내' 기준 · contacts.json) ─────────
+   판정은 브이월드 공역 그대로, 이 카드는 '누구에게 문의하나'만 알려줌.
+   구역: 브이월드 구역 번호(P61A·R75 등)나 이름(관제권)으로 연결 / 지역: 지번 주소(시도·시군구·읍면동·리)로 연결 */
+let CONTACTS = null, ctOpenPref = null;
+const APP_V = (() => { try { return new URL(document.currentScript.src).searchParams.get('v') || ''; } catch (e) { return ''; } })();
+fetch('contacts.json' + (APP_V ? '?v=' + APP_V : '')).then(r => r.ok ? r.json() : null).then(j => {
+  if (!j || !Array.isArray(j.zones)) return;
+  CONTACTS = j;
+  if (lastResult) fillContacts(lastResult);
+  renderMiscContacts();
+}).catch(() => {});
+const SIDO_KEYS = [['서울', '서울'], ['부산', '부산'], ['대구', '대구'], ['인천', '인천'], ['광주', '광주'], ['대전', '대전'], ['울산', '울산'], ['세종', '세종'],
+  ['경기', '경기'], ['강원', '강원'], [/충청북|충북/, '충북'], [/충청남|충남/, '충남'], [/전라북|전북/, '전북'], [/전라남|전남/, '전남'], [/경상북|경북/, '경북'], [/경상남|경남/, '경남'], ['제주', '제주']];
+const ADDR_ALIAS = { '문무대왕면': '양북면', '세종대왕면': '능서면', '양촌읍': '양촌면', '퇴계원읍': '퇴계원면' }; // 이름이 바뀐 곳(표는 옛 이름)
+function addrInfo(addr) {
+  const t = addr && (addr.parcel || addr.road);
+  if (!t) return null;
+  const toks = String(t).trim().split(/\s+/), first = toks[0] || '';
+  const sd = new Set(SIDO_KEYS.filter(([k]) => typeof k === 'string' ? first.includes(k) : k.test(first)).map(x => x[1])); // 통합 시·도(예: 전남광주)는 둘 다
+  const set = new Set(toks.slice(1));
+  toks.slice(1).forEach(x => { if (ADDR_ALIAS[x]) set.add(ADDR_ALIAS[x]); });
+  return sd.size ? { sd, set } : null;
+}
+// '시도 시군구 읍면동 리' 형식(여러 개는 |). 맞으면 구체적인 정도(1~4), 아니면 0
+function specMatch(spec, a) {
+  const p = spec.split(' ');
+  if (!a.sd.has(p[0])) return 0;
+  for (let i = 1; i < p.length; i++) if (!p[i].split('|').some(x => a.set.has(x))) return 0;
+  return p.length;
+}
+function bestByAddr(list, a) {
+  if (!a) return { hits: [], partial: false };
+  const ok = e => !(e.except || []).some(sp => specMatch(sp, a));
+  let best = 0, hits = [];
+  for (const e of list) {
+    if (!ok(e)) continue;
+    const sc = Math.max(0, ...(e.where || []).map(sp => specMatch(sp, a)));
+    if (!sc) continue;
+    if (sc > best) { best = sc; hits = [e]; } else if (sc === best) hits.push(e);
+  }
+  if (hits.length) return { hits, partial: false };
+  // 리·읍면까지 딱 맞는 줄이 없으면, 가장 깊게(시군구 → 읍면동) 맞는 후보들을 보여줌
+  const depth = sp => { const p = sp.split(' '); if (!a.sd.has(p[0])) return 0; let d = 1; while (d < p.length && p[d].split('|').some(x => a.set.has(x))) d++; return d; };
+  let top = 1, cand = [];
+  for (const e of list) {
+    if (!ok(e)) continue;
+    const d = Math.max(0, ...(e.where || []).map(depth));
+    if (d < 2) continue;
+    if (d > top) { top = d; cand = [e]; } else if (d === top) cand.push(e);
+  }
+  return { hits: cand, partial: cand.length > 0 };
+}
+const propText = props => Object.values(props || {}).filter(v => typeof v === 'string').join(' ').toUpperCase();
+function zoneCodes(props) {
+  const out = new Set();
+  for (const m of propText(props).matchAll(/(?:^|[^A-Z0-9]|RK)([PRA])\s?-?\s?(\d{1,3}[A-Z]{0,2})(?![A-Z0-9])/g)) out.add(m[1] + m[2]);
+  return out;
+}
+const codeHit = (k, codes) => [...codes].some(c => c === k || (c.startsWith(k) && /^[A-Z]+$/.test(c.slice(k.length)))); // P518 → P518W 도 인정, R7 ≠ R75
+function zoneContacts(item, a) {
+  const kid = item.zone.id.replace('LT_C_AIS', '');
+  const cand = CONTACTS.zones.filter(e => String(e.kind).split('|').includes(kid));
+  if (!cand.length) return [];
+  const props = item.feature && item.feature.properties, codes = zoneCodes(props), up = propText(props);
+  let hits = cand.filter(e => e.any || (e.codes && e.codes.some(k => codeHit(k, codes))));
+  if (!hits.length) hits = cand.filter(e => e.names && e.names.some(n => /^[A-Z]+$/.test(n) && new RegExp('(^|[^A-Z])' + n + '([^A-Z]|$)').test(up))); // 영문·공항코드 우선
+  if (!hits.length) hits = cand.filter(e => e.names && e.names.some(n => /[가-힣]/.test(n) && up.includes(n)));
+  if (hits.length > 1 && hits.every(e => e.where)) { const r = bestByAddr(hits, a); if (r.hits.length && !r.partial) hits = r.hits; } // 같은 번호를 지역으로 나눈 경우(P518·P61A)
+  return hits;
+}
+function telHtml(t) {
+  const m = String(t).match(/0\d{1,3}-\d{3,4}-\d{4}/);
+  if (!m) return esc(t);
+  return `<span class="tn">${esc(t.slice(0, m.index))}<a class="tel" href="tel:${m[0].replace(/-/g, '')}">${esc(m[0])}</a>${esc(t.slice(m.index + m[0].length))}</span>`;
+}
+function ctItem(e, org) {
+  const cs = e.contacts || [{ org, tel: e.tel }];
+  return `<div class="ct-item"><div class="ct-area">${esc(e.area)}</div>
+    ${cs.map(c => `<div class="ct-org">${c.org ? `<span>${esc(c.org)}</span>` : ''}${(c.tel || []).length ? `<span class="ct-tels">${c.tel.map(telHtml).join('<i>·</i>')}</span>` : ''}${c.fax ? `<small>팩스 ${esc(c.fax)}</small>` : ''}</div>`).join('')}
+    ${e.note ? `<div class="ct-note">※ ${esc(e.note)}</div>` : ''}${e.link ? `<a class="ct-link" href="${esc(e.link)}" target="_blank" rel="noopener">드론원스톱 공지사항 보기 ↗</a>` : ''}</div>`;
+}
+function ctGroup(icon, title, desc, items, tail) {
+  return `<div class="ct-group"><div class="ct-title">${icon} ${title}${desc ? `<small>${desc}</small>` : ''}</div>${items}${tail || ''}</div>`;
+}
+function fillContacts(r) {
+  const box = $('#contactBox');
+  if (!box || !CONTACTS || !r) return;
+  const a = addrInfo(r.addr);
+  let h = '', autoOpen = false;
+  // ① 이 지점이 속한 구역의 비행승인 담당
+  const zoneItems = [], seen = new Set();
+  for (const x of r.inside) {
+    if (x.zone.id === 'NOTAM' || x.zone.level < 1) continue;
+    if (x.zone.level >= 2) autoOpen = true;
+    const hits = zoneContacts(x, a);
+    if (!hits.length) { zoneItems.push(`<div class="ct-item"><div class="ct-area">${esc(x.zone.name)}${x.label ? ' · ' + esc(x.label) : ''}</div><div class="ct-note">연락처 표에서 찾지 못했어요 — 아래 지역 관할 기관에 문의하세요.</div></div>`); continue; }
+    for (const e of hits) if (!seen.has(e)) { seen.add(e); zoneItems.push(ctItem(e)); }
+  }
+  if (zoneItems.length) h += ctGroup('🛑', '구역 비행승인', '이 지점이 속한 공역의 담당', zoneItems.join(''), zoneItems.length > 1 ? '<div class="ct-note">여러 곳이 나오면 해당 구역마다 승인이 필요할 수 있어요.</div>' : '');
+  if (!a) h += `<p class="muted small">주소를 찾지 못해 지역별 연락처는 표시할 수 없어요 (바다 위 등).</p>`;
+  else {
+    // ② 지역 관할(특별비행·150m 초과 등)  ③ 항공촬영(군)
+    const f = bestByAddr(CONTACTS.flight, a), ph = bestByAddr(CONTACTS.photo, a);
+    const tail = x => x.partial ? '<div class="ct-note">⚠️ 읍·면까지 딱 맞는 줄이 없어 같은 시·군의 후보를 모두 보여줘요. 전화로 확인하세요.</div>'
+      : x.hits.length > 1 ? '<div class="ct-note">⚠️ 여러 곳이 해당될 수 있어요 — 전화로 확인하세요.</div>' : '';
+    const fh = f.hits.length ? f : { hits: CONTACTS.flight.filter(e => e.where.some(sp => a.sd.has(sp.split(' ')[0]))), partial: true };
+    if (fh.hits.length) h += ctGroup('✈️', '특별비행·지역 비행승인', '야간·가시권 밖, 150m 초과, 25kg 초과 등', fh.hits.map(e => ctItem(e)).join(''), tail(fh));
+    if (ph.hits.length) h += ctGroup('📷', '항공촬영 허가 (군)', '촬영 목적 비행 시 — 국가·군사 보안시설 확인', ph.hits.map(e => ctItem(e, '항공촬영 민원처리 책임부대')).join(''), tail(ph));
+  }
+  if (!h) { box.innerHTML = ''; return; }
+  const open = ctOpenPref != null ? ctOpenPref : autoOpen;
+  box.innerHTML = `<details class="contacts"${open ? ' open' : ''}><summary>📞 담당 연락처 <small>비행승인·특별비행·항공촬영</small></summary>${h}
+    <p class="ct-foot">기준 ${esc(CONTACTS.updated)} · 드론원스톱 '처리부서안내' · 번호가 바뀌었을 수 있으니 신청 전 <a href="https://drone.onestop.go.kr" target="_blank" rel="noopener">드론원스톱</a>에서 최종 확인하세요.</p></details>`;
+  box.querySelector('details').addEventListener('toggle', e => { ctOpenPref = e.target.open; });
+}
+// 안내 탭: 장치신고·사업등록
+function renderMiscContacts() {
+  const el = $('#miscContacts');
+  if (!el || !CONTACTS || !CONTACTS.misc) return;
+  el.innerHTML = CONTACTS.misc.map(e => `<div class="ct-org"><span>${esc(e.area)} · ${esc(e.org)}</span><span class="ct-tels">${e.tel.map(telHtml).join('<i>·</i>')}</span>${e.note ? `<small>${esc(e.note)}</small>` : ''}</div>`).join('');
+}
+
 function renderResult(r) {
   const v = r.verdict;
   const addrLine = r.label || (r.addr && (r.addr.road || r.addr.parcel)) || '선택한 지점';
@@ -913,6 +1035,7 @@ function renderResult(r) {
     const d = t => { const k = new Date(t); return `${k.getMonth() + 1}/${k.getDate()}`; };
     h += `<p class="muted small">ℹ️ ${r.fromNational.map(x => esc(x.zone.name)).join('·')}은 저장된 전국 자료(${d(Math.min(...r.fromNational.map(x => x.t)))})로 확인했어요.</p>`;
   }
+  h += `<div id="contactBox"></div>`;
   h += `<div id="wxBox"><div class="hint"><span class="spinner"></span>날씨 확인 중…</div></div>
     <p class="muted small" style="margin-top:12px">※ 참고용입니다. 항공고시보(임시 구역)는 드론 관련만 30분 간격으로 반영돼 늦을 수 있으니 비행 전 드론 원스톱에서 최종 확인하세요.</p>`;
   sheetHtml(h);
@@ -920,6 +1043,7 @@ function renderResult(r) {
   $('#btnLogHere').onclick = () => openLogForm({ fromResult: r });
   $('#btnFlyStart').onclick = () => startTimer();
   $('#btnCopy').onclick = () => copyPoint(r);
+  fillContacts(r);
   const rb = $('#btnRecheck'); if (rb) rb.onclick = () => checkAt(r.lat, r.lon, r.label || undefined, { retried: true });
 }
 
