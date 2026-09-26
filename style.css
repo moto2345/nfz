@@ -171,6 +171,39 @@ a.btn{text-decoration:none;color:var(--primary)}
 
 .toast{position:fixed;left:50%;bottom:calc(var(--tabbar-h) + var(--safe-b) + 13px);transform:translateX(-50%);background:rgba(20,24,32,.92);color:#fff;
   padding:8px 13px;border-radius:8px;font-size:11px;z-index:3000;max-width:90vw;text-align:center}
+/* 지자기 Kp 안내 카드 */
+.kp-card{position:absolute;left:10px;right:58px;bottom:calc(var(--sheet-h,96px) + 10px);z-index:900;max-width:380px;
+  max-height:calc(100% - var(--sheet-h,96px) - 76px);overflow-y:auto;background:var(--card);color:var(--text);border-radius:16px;box-shadow:0 8px 28px rgba(0,0,0,.28);padding:14px 16px 12px;
+  animation:kpcIn .18s ease-out;word-break:keep-all;overflow-wrap:anywhere}
+@keyframes kpcIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.kpc-head{display:flex;align-items:center;gap:10px}
+.kpc-ico{font-size:24px;line-height:1}
+.kpc-head div{flex:1;min-width:0}
+.kpc-head b{display:block;font-size:16px}
+.kpc-head small{display:block;font-size:12px;color:var(--muted);margin-top:1px}
+.kpc-x{border:0;background:none;font-size:18px;color:var(--muted);padding:4px 6px;cursor:pointer;align-self:flex-start}
+.kpc-now{display:flex;align-items:center;gap:10px;margin:10px 0 4px}
+.kpc-now b{font-size:34px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums}
+.kpc-pill{font-size:13px;font-weight:800;padding:4px 10px;border-radius:999px;color:#fff}
+.kp-card.kp-ok .kpc-now b{color:var(--green)} .kp-card.kp-ok .kpc-pill{background:var(--green)}
+.kp-card.kp-mid .kpc-now b{color:#e65100} .kp-card.kp-mid .kpc-pill{background:#ef6c00}
+.kp-card.kp-bad .kpc-now b{color:var(--red)} .kp-card.kp-bad .kpc-pill{background:var(--red)}
+.kpc-scale{position:relative;margin:8px 0 2px;padding-bottom:16px}
+.kpc-bar{display:flex;gap:2px;height:8px}
+.kpc-bar i{flex:1;border-radius:2px;background:#66bb6a}
+.kpc-bar i:nth-child(n+5){background:#ffa726}
+.kpc-bar i:nth-child(n+6){background:#ef5350}
+.kpc-mark{position:absolute;top:8px;transform:translateX(-50%);font-size:11px;line-height:1;color:var(--text)}
+.kpc-ticks{position:absolute;left:0;right:0;top:20px;height:12px;font-size:10px;color:var(--muted)}
+.kpc-ticks span{position:absolute;transform:translateX(-50%)}
+.kpc-ticks span:nth-child(1){left:0;transform:none} .kpc-ticks span:nth-child(2){left:44.4%} .kpc-ticks span:nth-child(3){left:55.6%} .kpc-ticks span:nth-child(4){right:0;left:auto;transform:none}
+.kpc-msg{margin:12px 0 0;font-size:14px;line-height:1.5}
+.kpc-fc{margin:6px 0 0;font-size:13px;line-height:1.45;color:var(--muted)}
+.kpc-fc.warn{color:var(--red);font-weight:700}
+.kpc-legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;padding-top:9px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
+.kpc-legend span{display:flex;align-items:center;gap:5px}
+.kpc-legend i{width:10px;height:10px;border-radius:50%;display:inline-block}
+.kpc-legend i.g{background:#66bb6a} .kpc-legend i.o{background:#ffa726} .kpc-legend i.r{background:#ef5350}
 .spinner{display:inline-block;width:13px;height:13px;border:2px solid var(--line);border-top-color:var(--primary);border-radius:50%;animation:spin .8s linear infinite;vertical-align:-3px;margin-right:5px}
 @keyframes spin{to{transform:rotate(360deg)}}
 .leaflet-control-layers{font-size:11px}

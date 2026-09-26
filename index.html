@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="하코 NFZ">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-  <link rel="stylesheet" href="style.css?v=51">
+  <link rel="stylesheet" href="style.css?v=52">
 </head>
 <body>
 
@@ -20,7 +20,7 @@
 <header class="appbar">
   <img src="icons/icon-192.png" alt="" class="appbar-logo">
   <h1>하코 NFZ 조회</h1>
-  <span class="badge">웹버전 v1.51</span>
+  <span class="badge">웹버전 v1.52</span>
   <button id="btnNotam" class="appbar-btn notam hidden" type="button" aria-label="항공고시보" title="드론 관련 항공고시보">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M10 20.5a2.2 2.2 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
     <span id="notamCount" class="cnt">0</span>
@@ -58,6 +58,23 @@
     <div id="hudZoneRow" class="hidden"><span>제한구역</span><b id="hudZone">-</b></div>
   </div>
 
+  <!-- 지자기 Kp 안내 카드 (Kp 버튼) -->
+  <div id="kpCard" class="kp-card hidden" role="dialog" aria-label="지자기 Kp 지수 안내">
+    <div class="kpc-head">
+      <span class="kpc-ico">🧲</span>
+      <div><b>지자기 Kp 지수</b><small>태양 활동으로 지구 자기장이 흔들리는 정도</small></div>
+      <button type="button" class="kpc-x" aria-label="닫기">✕</button>
+    </div>
+    <div class="kpc-now"><b id="kpcVal">-</b><span id="kpcLv" class="kpc-pill">-</span></div>
+    <div class="kpc-scale" aria-hidden="true">
+      <div class="kpc-bar"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <span id="kpcMark" class="kpc-mark">▲</span>
+      <div class="kpc-ticks"><span>0</span><span>4</span><span>5</span><span>9</span></div>
+    </div>
+    <p id="kpcMsg" class="kpc-msg">-</p>
+    <p id="kpcFc" class="kpc-fc hidden">-</p>
+    <div class="kpc-legend"><span><i class="g"></i>0~3 안정</span><span><i class="o"></i>4 주의</span><span><i class="r"></i>5 이상 폭풍</span></div>
+  </div>
   <div class="fab-col">
     <button id="kpBadge" class="kp-badge hidden" type="button" aria-label="지자기 Kp 지수"><small>Kp</small><b id="kpVal">-</b></button>
     <button id="btnTrack" class="fab track" type="button" aria-label="실시간 위치 추적 켜기" aria-pressed="false" title="실시간 위치 추적">
@@ -302,7 +319,7 @@
 <div id="toast" class="toast hidden"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="config.js?v=51"></script>
-<script src="app.js?v=51"></script>
+<script src="config.js?v=52"></script>
+<script src="app.js?v=52"></script>
 </body>
 </html>

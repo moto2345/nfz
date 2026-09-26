@@ -501,13 +501,33 @@ function updateKpBadge(v) {
 function refreshKp() { if (!document.hidden) fetchKp().then(updateKpBadge).catch(() => {}); }
 refreshKp();
 setInterval(refreshKp, 600e3);
-$('#kpBadge').addEventListener('click', () => {
+// Kp 버튼 → 안내 카드 (현재 값·단계·눈금·비행 조언·6시간 예보). 카드나 바깥을 누르면 닫힘, 15초 뒤 자동으로 닫힘
+let kpCardTimer = null;
+function closeKpCard() { $('#kpCard').classList.add('hidden'); clearTimeout(kpCardTimer); }
+function openKpCard() {
   if (!kpShown) return;
-  const k = kpShown.now, m = kpShown.max6;
-  const what = k >= 5 ? '지자기 폭풍 — GPS·나침반이 불안정할 수 있어요. 수동(ATTI) 조종에 자신 없으면 비행을 미루세요.'
-    : k >= 4 ? '약간 불안정 — GPS 위성 수와 홈포인트를 꼭 확인하세요.' : '안정 — GPS·나침반 영향이 거의 없어요.';
-  toast(`지자기 Kp ${k} · ${what}${m != null && m >= 5 && k < 5 ? ` (6시간 안에 최대 Kp ${m} 예보)` : ''} (0~3 안정 · 4 주의 · 5 이상 폭풍)`, 6000);
+  const k = kpShown.now, m = kpShown.max6, lv = kpLevel(k), card = $('#kpCard');
+  card.className = 'kp-card ' + lv.cls;
+  $('#kpcVal').textContent = k;
+  $('#kpcLv').textContent = lv.txt;
+  $('#kpcMark').style.left = `${Math.max(0, Math.min(9, k)) / 9 * 100}%`;
+  $('#kpcMsg').textContent = k >= 5 ? '⛔ GPS·나침반이 불안정할 수 있어요. 수동(ATTI) 조종에 자신 없으면 비행을 미루세요.'
+    : k >= 4 ? '⚠️ GPS 위성 수와 홈포인트 기록을 꼭 확인하고 비행하세요.' : '✅ GPS·나침반 영향이 거의 없어요. 평소처럼 비행해도 돼요.';
+  const fc = $('#kpcFc');
+  fc.classList.toggle('hidden', m == null);
+  if (m != null) {
+    fc.textContent = `🕒 앞으로 6시간 예보 최대 Kp ${m}` + (m >= 5 ? ' — 폭풍 예보, 긴 비행은 피하세요' : m >= 4 ? ' — 약간 불안정해질 수 있어요' : ' — 안정 예상');
+    fc.classList.toggle('warn', m >= 5);
+  }
+  clearTimeout(kpCardTimer); kpCardTimer = setTimeout(closeKpCard, 15000);
+}
+$('#kpBadge').addEventListener('click', e => {
+  e.stopPropagation();
+  if (!$('#kpCard').classList.contains('hidden')) return closeKpCard();
+  openKpCard();
 });
+$('#kpCard').addEventListener('click', closeKpCard);
+document.addEventListener('pointerdown', e => { if (!e.target.closest('#kpCard, #kpBadge')) closeKpCard(); }, true);
 // 기체별 최대 내풍 성능(제조사 공식 사양, m/s) — 강풍 판정 기준
 const DRONES = [
   { id: 'std', name: '기체 선택 안 함 (250g급 기준)', wind: 10.7 },
