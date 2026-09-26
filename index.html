@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="하코 NFZ">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-  <link rel="stylesheet" href="style.css?v=39">
+  <link rel="stylesheet" href="style.css?v=40">
 </head>
 <body>
 
@@ -20,7 +20,7 @@
 <header class="appbar">
   <img src="icons/icon-192.png" alt="" class="appbar-logo">
   <h1>하코 NFZ 조회</h1>
-  <span class="badge">웹버전 v1.39</span>
+  <span class="badge">웹버전 v1.40</span>
   <button id="btnNotam" class="appbar-btn notam hidden" type="button" aria-label="항공고시보" title="드론 관련 항공고시보">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M10 20.5a2.2 2.2 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
     <span id="notamCount" class="cnt">0</span>
@@ -41,6 +41,13 @@
       <button type="submit" aria-label="검색">🔍</button>
     </form>
     <div id="searchResults" class="dropdown hidden"></div>
+  </div>
+
+  <div id="navHud" class="nav-hud hidden" aria-live="off">
+    <div class="hud-dir"><svg id="hudArrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 19 20l-7-4-7 4z" fill="currentColor"/></svg><b id="hudDir">-</b></div>
+    <div><span>속도</span><b id="hudSpd">-</b></div>
+    <div><span>고도</span><b id="hudAlt">-</b></div>
+    <div><span>GPS</span><b id="hudAcc">-</b></div>
   </div>
 
   <div class="fab-col">
@@ -246,7 +253,7 @@
 <div id="toast" class="toast hidden"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="config.js?v=39"></script>
-<script src="app.js?v=39"></script>
+<script src="config.js?v=40"></script>
+<script src="app.js?v=40"></script>
 </body>
 </html>

@@ -249,3 +249,16 @@ a.btn{text-decoration:none;color:var(--primary)}
 .diag li small{grid-column:2;color:var(--muted);word-break:break-all}
 .diag li.bad b{color:var(--red)}
 .diag li.warn b{color:#e65100}
+
+/* 실시간 추적 계기판 (지도 왼쪽 위) */
+.nav-hud{position:absolute;left:10px;top:60px;z-index:800;background:rgba(255,255,255,.94);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.22);
+  padding:6px 9px;min-width:92px;font-size:11px;line-height:1.35;font-variant-numeric:tabular-nums;pointer-events:none}
+.nav-hud div{display:flex;justify-content:space-between;gap:8px}
+.nav-hud span{color:var(--muted)}
+.nav-hud b{font-weight:800;color:#222}
+.nav-hud .hud-dir{justify-content:flex-start;align-items:center;gap:5px;margin-bottom:2px;font-size:12px}
+.nav-hud .hud-dir svg{width:16px;height:16px;color:#1a73e8;transition:transform .3s}
+/* 내 위치 점의 방향 화살표 */
+.me-heading{pointer-events:none}
+.me-heading svg{width:44px;height:44px;display:block;transition:transform .3s;filter:drop-shadow(0 1px 2px rgba(0,0,0,.35))}
+#tab-map:has(#timerBanner:not(.hidden)) .nav-hud{top:104px} /* 비행 중 표시줄과 겹치지 않게 */

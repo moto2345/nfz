@@ -988,9 +988,57 @@ async function keepAwake(on) {
     if (!on && wakeLock) { await wakeLock.release(); wakeLock = null; }
   } catch (e) {}
 }
+/* 계기판: 방향(이동 중엔 GPS 진행 방향, 멈춰 있으면 휴대폰 나침반)·속도·고도(휴대폰 GPS, 해발)·GPS 정확도 */
+const DIR16 = ['북', '북북동', '북동', '동북동', '동', '동남동', '남동', '남남동', '남', '남남서', '남서', '서남서', '서', '서북서', '북서', '북북서'];
+let gpsHeading = null, compassHeading = null, prevFix = null, headingMarker = null, compassOn = false;
+function currentHeading() { return gpsHeading != null ? gpsHeading : compassHeading; }
+function renderHeading() {
+  const h = currentHeading();
+  $('#hudDir').textContent = h == null ? '방향 -' : `${DIR16[Math.round(h / 22.5) % 16]} ${Math.round(h)}°`;
+  $('#hudArrow').style.transform = `rotate(${h || 0}deg)`;
+  if (!meMarker) return;
+  if (h == null) { if (headingMarker) { map.removeLayer(headingMarker); headingMarker = null; } return; }
+  const html = `<svg viewBox="0 0 44 44" style="transform:rotate(${h}deg)"><path d="M22 2 29 17H15z" fill="#1a73e8" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg>`;
+  if (!headingMarker) headingMarker = L.marker(meMarker.getLatLng(), { icon: L.divIcon({ className: 'me-heading', html, iconSize: [44, 44], iconAnchor: [22, 22] }), interactive: false, keyboard: false }).addTo(map);
+  else { headingMarker.setLatLng(meMarker.getLatLng()); const svg = headingMarker.getElement() && headingMarker.getElement().querySelector('svg'); if (svg) svg.style.transform = `rotate(${h}deg)`; }
+}
+function updateHud(c, t) {
+  let spd = c.speed;
+  if ((spd == null || isNaN(spd)) && prevFix && c.accuracy < 30) { // 속도를 안 주는 기기: 두 위치 사이 거리÷시간
+    const dt = (t - prevFix.t) / 1000;
+    if (dt >= 2) { spd = distM([prevFix.lat, prevFix.lon], [c.latitude, c.longitude]) / dt; if (spd > 60) spd = null; } // 너무 짧은 간격·튀는 값은 버림
+    else spd = undefined; // 아직 계산 안 함 → 이전 표시 유지
+  }
+  if (spd === undefined) { renderHeading(); $('#hudAcc').textContent = `±${Math.round(c.accuracy)} m`; return; }
+  prevFix = { lat: c.latitude, lon: c.longitude, t };
+  gpsHeading = spd != null && spd > 1 && c.heading != null && !isNaN(c.heading) ? c.heading : null; // 걷는 속도 이상일 때만 진행 방향 사용
+  $('#hudSpd').textContent = spd == null || isNaN(spd) ? '-' : `${(spd * 3.6).toFixed(spd * 3.6 < 10 ? 1 : 0)} km/h`;
+  $('#hudAlt').textContent = c.altitude == null || isNaN(c.altitude) ? '-' : `${Math.round(c.altitude)} m`;
+  $('#hudAcc').textContent = `±${Math.round(c.accuracy)} m`;
+  renderHeading();
+}
+// 휴대폰 나침반 (멈춰 있을 때 방향)
+function onOrient(e) {
+  let h = null;
+  if (typeof e.webkitCompassHeading === 'number') h = e.webkitCompassHeading; // 아이폰
+  else if (e.absolute && e.alpha != null) h = 360 - e.alpha;                 // 안드로이드 (자북 기준)
+  if (h == null) return;
+  const so = (screen.orientation && screen.orientation.angle) || window.orientation || 0; // 화면을 가로로 돌렸을 때 보정
+  compassHeading = (h + so + 360) % 360;
+  if (gpsHeading == null) renderHeading();
+}
+async function compass(on) {
+  const ev = 'ondeviceorientationabsolute' in window ? 'deviceorientationabsolute' : 'deviceorientation';
+  if (on && !compassOn) {
+    try { if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function' && (await DeviceOrientationEvent.requestPermission()) !== 'granted') return; } catch (e) { return; }
+    window.addEventListener(ev, onOrient); compassOn = true;
+  } else if (!on && compassOn) { window.removeEventListener(ev, onOrient); compassOn = false; compassHeading = null; }
+}
+
 function onTrackPos(p) {
   const { latitude: lat, longitude: lon, accuracy } = p.coords;
   showMe(lat, lon, accuracy);
+  updateHud(p.coords, p.timestamp || Date.now());
   $('#btnLocate').classList.add('found');
   if (trackFollow && $('#tab-map').classList.contains('active')) setViewVisible([lat, lon], map.getZoom());
   const moved = !trackLast || distM(trackLast, [lat, lon]) >= TRACK_MOVE_M;
@@ -1017,12 +1065,18 @@ function startTrack() {
     else toast('위치 신호가 약합니다. 계속 찾는 중…');
   }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
   keepAwake(true);
+  compass(true); // 버튼을 누른 순간에 켜야 아이폰에서 권한을 물을 수 있음
+  gpsHeading = null; prevFix = null;
+  $('#navHud').classList.remove('hidden');
   trackUI();
   toast('실시간 위치 추적을 켰어요. 움직이면 판정이 바로 바뀌고, 더 엄격한 구역에 들어가면 진동으로 알려줘요.', 4000);
 }
 function stopTrack(quiet) {
   if (trackId != null) navigator.geolocation.clearWatch(trackId);
-  trackId = null; keepAwake(false); trackUI();
+  trackId = null; keepAwake(false); compass(false); gpsHeading = null;
+  $('#navHud').classList.add('hidden');
+  if (headingMarker) { map.removeLayer(headingMarker); headingMarker = null; }
+  trackUI();
   if (!quiet) toast('실시간 위치 추적을 껐어요.');
 }
 $('#btnTrack').addEventListener('click', () => {
