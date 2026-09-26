@@ -20,6 +20,16 @@ a{color:var(--primary)}
   display:flex;align-items:center;gap:6px;background:var(--primary);color:#fff;box-shadow:0 1px 5px rgba(0,0,0,.2)}
 .appbar-logo{width:22px;height:22px;border-radius:6px;flex:none}
 .appbar h1{margin:0;font-size:15px;font-weight:800;letter-spacing:-.3px;white-space:nowrap}
+.wx-btn{flex:none;display:inline-flex;align-items:center;gap:3px;height:26px;padding:0 9px 0 7px;border:1px solid rgba(255,255,255,.45);border-radius:14px;
+  background:rgba(255,255,255,.15);color:#fff;font-size:12px;font-weight:700;white-space:nowrap;cursor:pointer;position:relative;-webkit-tap-highlight-color:transparent}
+.wx-btn:active{background:rgba(255,255,255,.3)}
+.wx-btn .wxb-ico{font-size:13px;line-height:1}
+.wx-btn.warn::after{content:"";position:absolute;top:-2px;right:-2px;width:9px;height:9px;border-radius:50%;background:#ffb300;border:2px solid var(--primary)}
+@media (max-width:370px){ .wx-btn .wxb-txt{display:none} .wx-btn{padding:0 7px} }
+.wxm-head{display:flex;align-items:center;justify-content:space-between}
+.wxm-x{border:0;background:none;font-size:18px;color:var(--muted);padding:4px 6px;cursor:pointer}
+.wxm-where{margin:0 0 4px;font-size:12px;color:var(--muted);word-break:keep-all}
+.wx-modal .section-title{margin-top:6px}
 .appbar .badge{font-size:11px;font-weight:700;padding:2px 6px;border-radius:16px;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.45);white-space:nowrap}
 .tab{position:fixed;inset:var(--appbar-h) 0 calc(var(--tabbar-h) + var(--safe-b)) 0;display:none}
 .tab.active{display:block}

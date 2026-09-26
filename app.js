@@ -817,6 +817,23 @@ async function checkAt(lat, lon, label, opt = {}) {
   });
 }
 
+// 날씨는 상단 [현재날씨] 버튼의 창에 표시 (결과창을 짧게). 같은 지점을 다시 확인할 땐 깜빡이지 않게 그대로 둠
+let wxFor = null;
+function wxPrepare(r, where) {
+  $('#wxWhere').textContent = '📍 ' + where;
+  const same = wxFor && Math.hypot(...toLocal(r.lon, r.lat, wxFor.lat, wxFor.lon)) < 150;
+  if (!same) $('#wxBox').innerHTML = `<div class="hint"><span class="spinner"></span>날씨 확인 중…</div>`;
+  wxFor = { lat: r.lat, lon: r.lon };
+}
+function openWx() {
+  if (!lastResult) { $('#wxWhere').textContent = ''; $('#wxBox').innerHTML = '<p class="muted small">지도를 누르거나 내 위치(⌖)를 확인하면 그 지점의 날씨가 나와요.</p>'; }
+  $('#wxModal').classList.remove('hidden'); $('#wxModal .modal-box').scrollTop = 0;
+}
+const closeWx = () => $('#wxModal').classList.add('hidden');
+$('#btnWx').addEventListener('click', openWx);
+$('#btnWxClose').addEventListener('click', closeWx);
+$('#btnWxX').addEventListener('click', closeWx);
+$('#wxModal').addEventListener('click', e => { if (e.target.id === 'wxModal') closeWx(); });
 function showWeather(r) {
   const box = $('#wxBox'); if (!box || !r.wx) return;
   box.innerHTML = weatherHtml(r.wx);
@@ -834,6 +851,7 @@ function applyWeatherToVerdict(r, iss) {
   if (iss.windStrong) probs.push(`강풍(${currentDrone().id === 'std' ? '250g급' : currentDrone().name} 기준)`);
   if (iss.rain) probs.push('비·눈');
   if (iss.fog) probs.push('안개');
+  if (r === lastResult) { const b = $('#btnWx'); b.classList.toggle('warn', probs.length > 0); b.title = probs.length ? '지금: ' + probs.join(', ') : '현재 날씨'; }
   if (!probs.length) return;
   const v = r.verdict, el = $('#sheetBody .verdict');
   if (!el) return;
@@ -1036,8 +1054,8 @@ function renderResult(r) {
     h += `<p class="muted small">ℹ️ ${r.fromNational.map(x => esc(x.zone.name)).join('·')}은 저장된 전국 자료(${d(Math.min(...r.fromNational.map(x => x.t)))})로 확인했어요.</p>`;
   }
   h += `<div id="contactBox"></div>`;
-  h += `<div id="wxBox"><div class="hint"><span class="spinner"></span>날씨 확인 중…</div></div>
-    <p class="muted small" style="margin-top:12px">※ 참고용입니다. 항공고시보(임시 구역)는 드론 관련만 30분 간격으로 반영돼 늦을 수 있으니 비행 전 드론 원스톱에서 최종 확인하세요.</p>`;
+  wxPrepare(r, addrLine);
+  h += `<p class="muted small" style="margin-top:12px">※ 참고용입니다. 항공고시보(임시 구역)는 드론 관련만 30분 간격으로 반영돼 늦을 수 있으니 비행 전 드론 원스톱에서 최종 확인하세요.</p>`;
   sheetHtml(h);
   $('#btnFav').onclick = () => addFavorite(r);
   $('#btnLogHere').onclick = () => openLogForm({ fromResult: r });
@@ -2173,10 +2191,8 @@ $('#btnDiagCopy').addEventListener('click', async () => {
   catch (e) { if (window.NFZApp && window.NFZApp.share) window.NFZApp.share(text); else prompt('아래 내용을 복사하세요', text); }
 });
 
-/* ───────── 앱에서 실행 중이면 배지를 '앱버전'으로 ───────── */
+/* ───────── 앱에서 실행 중이면 앱 설치 안내 숨김 ───────── */
 if (window.NFZApp) {
-  const bd = $('.appbar .badge');
-  if (bd) bd.textContent = bd.textContent.replace('웹버전', '앱버전');
   const dl = $('#androidApp'); if (dl) dl.classList.add('hidden');
 }
 

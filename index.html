@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="하코 NFZ">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-  <link rel="stylesheet" href="style.css?v=53">
+  <link rel="stylesheet" href="style.css?v=54">
 </head>
 <body>
 
@@ -20,7 +20,8 @@
 <header class="appbar">
   <img src="icons/icon-192.png" alt="" class="appbar-logo">
   <h1>하코 NFZ 조회</h1>
-  <span class="badge">웹버전 v1.53</span>
+  <span class="badge">v1.54</span>
+  <button id="btnWx" class="wx-btn" type="button" aria-label="현재 날씨" title="현재 날씨"><span class="wxb-ico">🌤</span><span class="wxb-txt">현재날씨</span></button>
   <button id="btnNotam" class="appbar-btn notam hidden" type="button" aria-label="항공고시보" title="드론 관련 항공고시보">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M10 20.5a2.2 2.2 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
     <span id="notamCount" class="cnt">0</span>
@@ -324,8 +325,18 @@
 
 <div id="toast" class="toast hidden"></div>
 
+<!-- ═════════ 현재 날씨 창 (상단 [현재날씨] 버튼) ═════════ -->
+<div id="wxModal" class="modal hidden">
+  <div class="modal-box wx-modal">
+    <div class="wxm-head"><h3>🌤 현재 날씨</h3><button type="button" class="wxm-x" id="btnWxX" aria-label="닫기">✕</button></div>
+    <p id="wxWhere" class="wxm-where"></p>
+    <div id="wxBox"></div>
+    <div class="row-btns"><button type="button" class="btn primary" id="btnWxClose">닫기</button></div>
+  </div>
+</div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="config.js?v=53"></script>
-<script src="app.js?v=53"></script>
+<script src="config.js?v=54"></script>
+<script src="app.js?v=54"></script>
 </body>
 </html>
