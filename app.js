@@ -937,7 +937,7 @@ function drawZones(r) {
 function showMe(lat, lon, accuracy) {
   if (meMarker) { meMarker.setLatLng([lat, lon]); meCircle.setLatLng([lat, lon]).setRadius(accuracy); }
   else {
-    meCircle = L.circle([lat, lon], { radius: accuracy, color: '#1e88e5', weight: 1, fillOpacity: 0.1, interactive: false }).addTo(map);
+    meCircle = L.circle([lat, lon], { radius: accuracy, stroke: false, fillColor: '#1e88e5', fillOpacity: 0.16, interactive: false }).addTo(map); // GPS 정확도 반경
     meMarker = L.circleMarker([lat, lon], { radius: 8, color: '#fff', weight: 3, fillColor: '#1e88e5', fillOpacity: 1 }).addTo(map);
   }
 }
@@ -998,8 +998,8 @@ function renderHeading() {
   $('#hudArrow').style.transform = `rotate(${h || 0}deg)`;
   if (!meMarker) return;
   if (h == null) { if (headingMarker) { map.removeLayer(headingMarker); headingMarker = null; } return; }
-  const html = `<svg viewBox="0 0 64 64" style="transform:rotate(${h}deg)"><path d="M32 1 39.5 13H24.5z" fill="#1a73e8" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>`;
-  if (!headingMarker) headingMarker = L.marker(meMarker.getLatLng(), { icon: L.divIcon({ className: 'me-heading', html, iconSize: [64, 64], iconAnchor: [32, 32] }), interactive: false, keyboard: false }).addTo(map);
+  const html = `<svg viewBox="0 0 40 40" style="transform:rotate(${h}deg)"><path d="M20 1.5 25.5 8.5H14.5z" fill="#1a73e8" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/></svg>`;
+  if (!headingMarker) headingMarker = L.marker(meMarker.getLatLng(), { icon: L.divIcon({ className: 'me-heading', html, iconSize: [40, 40], iconAnchor: [20, 20] }), interactive: false, keyboard: false }).addTo(map);
   else { headingMarker.setLatLng(meMarker.getLatLng()); const svg = headingMarker.getElement() && headingMarker.getElement().querySelector('svg'); if (svg) svg.style.transform = `rotate(${h}deg)`; }
 }
 function updateHud(c, t) {
