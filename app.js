@@ -992,15 +992,23 @@ async function keepAwake(on) {
 const DIR16 = ['북', '북북동', '북동', '동북동', '동', '동남동', '남동', '남남동', '남', '남남서', '남서', '서남서', '서', '서북서', '북서', '북북서'];
 let gpsHeading = null, compassHeading = null, prevFix = null, headingMarker = null, compassOn = false;
 function currentHeading() { return gpsHeading != null ? gpsHeading : compassHeading; }
+let rotShown = null;
+function smoothRot(h) { // 가장 가까운 쪽으로 돌도록 누적 각도 사용
+  if (rotShown == null) return (rotShown = h);
+  let d = ((h - rotShown) % 360 + 540) % 360 - 180;
+  return (rotShown += d);
+}
 function renderHeading() {
-  const h = currentHeading();
+  const h0 = currentHeading();
+  const h = h0 == null ? null : h0;
+  const rot = h == null ? 0 : smoothRot(h);
   $('#hudDir').textContent = h == null ? '방향 -' : `${DIR16[Math.round(h / 22.5) % 16]} ${Math.round(h)}°`;
-  $('#hudArrow').style.transform = `rotate(${h || 0}deg)`;
+  $('#hudArrow').style.transform = `rotate(${rot}deg)`;
   if (!meMarker) return;
   if (h == null) { if (headingMarker) { map.removeLayer(headingMarker); headingMarker = null; } return; }
-  const html = `<svg viewBox="0 0 40 40" style="transform:rotate(${h}deg)"><path d="M20 1.5 25.5 8.5H14.5z" fill="#1a73e8" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/></svg>`;
+  const html = `<svg viewBox="0 0 40 40" style="transform:rotate(${rot}deg)"><path d="M20 1.5 25.5 8.5H14.5z" fill="#1a73e8" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/></svg>`;
   if (!headingMarker) headingMarker = L.marker(meMarker.getLatLng(), { icon: L.divIcon({ className: 'me-heading', html, iconSize: [40, 40], iconAnchor: [20, 20] }), interactive: false, keyboard: false }).addTo(map);
-  else { headingMarker.setLatLng(meMarker.getLatLng()); const svg = headingMarker.getElement() && headingMarker.getElement().querySelector('svg'); if (svg) svg.style.transform = `rotate(${h}deg)`; }
+  else { headingMarker.setLatLng(meMarker.getLatLng()); const svg = headingMarker.getElement() && headingMarker.getElement().querySelector('svg'); if (svg) svg.style.transform = `rotate(${rot}deg)`; }
 }
 function updateHud(c, t) {
   let spd = c.speed;
@@ -1009,13 +1017,37 @@ function updateHud(c, t) {
     if (dt >= 2) { spd = distM([prevFix.lat, prevFix.lon], [c.latitude, c.longitude]) / dt; if (spd > 60) spd = null; } // 너무 짧은 간격·튀는 값은 버림
     else spd = undefined; // 아직 계산 안 함 → 이전 표시 유지
   }
-  if (spd === undefined) { renderHeading(); $('#hudAcc').textContent = `±${Math.round(c.accuracy)} m`; return; }
+  if (spd === undefined) { renderHeading(); setAcc(c.accuracy); return; }
   prevFix = { lat: c.latitude, lon: c.longitude, t };
   gpsHeading = spd != null && spd > 1 && c.heading != null && !isNaN(c.heading) ? c.heading : null; // 걷는 속도 이상일 때만 진행 방향 사용
   $('#hudSpd').textContent = spd == null || isNaN(spd) ? '-' : `${(spd * 3.6).toFixed(spd * 3.6 < 10 ? 1 : 0)} km/h`;
   $('#hudAlt').textContent = c.altitude == null || isNaN(c.altitude) ? '-' : `${Math.round(c.altitude)} m`;
-  $('#hudAcc').textContent = `±${Math.round(c.accuracy)} m`;
+  setAcc(c.accuracy);
   renderHeading();
+}
+// GPS 오차 색: 10m 이하 초록 · 30m 이하 주황 · 그 이상 빨강
+function setAcc(a) {
+  const el = $('#hudAcc');
+  el.textContent = `±${Math.round(a)} m`;
+  el.className = a <= 10 ? 'q-good' : a <= 30 ? 'q-mid' : 'q-bad';
+}
+// 위성 수(안드로이드 앱에서만): 위치 계산에 쓰는 위성 10개 이상 초록 · 6~9 주황 · 5 이하 빨강
+let satTimer = null;
+function satPoll(on) {
+  const has = !!(window.NFZApp && window.NFZApp.gnss);
+  $('#hudSatRow').classList.toggle('hidden', !has || !on);
+  clearInterval(satTimer); satTimer = null;
+  if (!has) return;
+  try { on ? window.NFZApp.gnssStart() : window.NFZApp.gnssStop(); } catch (e) {}
+  if (!on) return;
+  const tick = () => {
+    let g = null; try { g = JSON.parse(window.NFZApp.gnss()); } catch (e) {}
+    const el = $('#hudSat');
+    if (!g || g.used < 0) { el.textContent = '찾는 중'; el.className = 'q-mid'; return; }
+    el.textContent = `${g.used}개` + (g.seen > 0 ? ` / ${g.seen}` : '');
+    el.className = g.used >= 10 ? 'q-good' : g.used >= 6 ? 'q-mid' : 'q-bad';
+  };
+  tick(); satTimer = setInterval(tick, 1000);
 }
 // 휴대폰 나침반 (멈춰 있을 때 방향)
 function onOrient(e) {
@@ -1035,12 +1067,39 @@ async function compass(on) {
   } else if (!on && compassOn) { window.removeEventListener(ev, onOrient); compassOn = false; compassHeading = null; }
 }
 
+/* 부드러운 이동: 새 위치가 오면 이전 위치에서 새 위치까지 다음 위치가 올 때까지(보통 1초) 미끄러지듯 옮기고, 지도도 같은 속도로 따라감 */
+let meAnim = null, lastFixAt = 0;
+function animateMe(lat, lon, acc, dur) {
+  if (!meMarker) { showMe(lat, lon, acc); return; }
+  const from = meMarker.getLatLng(), t0 = performance.now(), ms = dur * 1000;
+  if (meAnim) cancelAnimationFrame(meAnim);
+  meCircle.setRadius(acc);
+  const step = now => {
+    const k = Math.min(1, (now - t0) / ms);
+    const ll = [from.lat + (lat - from.lat) * k, from.lng + (lon - from.lng) * k];
+    meMarker.setLatLng(ll); meCircle.setLatLng(ll); if (headingMarker) headingMarker.setLatLng(ll);
+    meAnim = k < 1 ? requestAnimationFrame(step) : null;
+  };
+  meAnim = requestAnimationFrame(step);
+}
+// 결과창·검색창을 피해 보이는 지도 한가운데로, 같은 시간 동안 일정한 속도로 이동
+function followTo(latlng, dur) {
+  const z = map.getZoom(), H = map.getSize().y;
+  const top = $('.searchbar').offsetTop + $('#searchForm').offsetHeight, bottom = H - (sheet.offsetHeight || 0);
+  const offset = bottom > top ? H / 2 - (top + bottom) / 2 : 0;
+  const c = map.unproject(map.project(latlng, z).add([0, offset]), z);
+  map.panTo(c, { animate: true, duration: dur, easeLinearity: 1, noMoveStart: true });
+}
 function onTrackPos(p) {
   const { latitude: lat, longitude: lon, accuracy } = p.coords;
-  showMe(lat, lon, accuracy);
-  updateHud(p.coords, p.timestamp || Date.now());
+  const now = Date.now(), gap = lastFixAt ? (now - lastFixAt) / 1000 : 1;
+  lastFixAt = now;
+  const dur = Math.max(0.25, Math.min(1.5, gap * 0.95)); // 위치가 오는 간격에 맞춰 이동 시간을 정함
+  const jump = meMarker && distM([meMarker.getLatLng().lat, meMarker.getLatLng().lng], [lat, lon]) > 2000; // 순간이동급이면 애니메이션 없이
+  if (jump || !meMarker) showMe(lat, lon, accuracy); else animateMe(lat, lon, accuracy, dur);
+  updateHud(p.coords, p.timestamp || now);
   $('#btnLocate').classList.add('found');
-  if (trackFollow && $('#tab-map').classList.contains('active')) setViewVisible([lat, lon], map.getZoom());
+  if (trackFollow && $('#tab-map').classList.contains('active')) { if (jump) setViewVisible([lat, lon], map.getZoom()); else followTo([lat, lon], dur); }
   const moved = !trackLast || distM(trackLast, [lat, lon]) >= TRACK_MOVE_M;
   if (trackFollow && moved && // 다른 지점을 보고 있는 동안(잠시 멈춤)에는 판정을 덮어쓰지 않음
       Date.now() - trackAt >= (trackLast ? TRACK_MIN_MS : 0)) {
@@ -1063,11 +1122,12 @@ function startTrack() {
   trackId = navigator.geolocation.watchPosition(onTrackPos, err => {
     if (err.code === 1) { stopTrack(); toast('위치 권한이 거부되었습니다. 브라우저 설정에서 허용해 주세요.'); }
     else toast('위치 신호가 약합니다. 계속 찾는 중…');
-  }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
+  }, { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }); // 저장된 옛 위치 말고 늘 새 위치
   keepAwake(true);
   compass(true); // 버튼을 누른 순간에 켜야 아이폰에서 권한을 물을 수 있음
-  gpsHeading = null; prevFix = null;
+  gpsHeading = null; prevFix = null; lastFixAt = 0;
   $('#navHud').classList.remove('hidden');
+  satPoll(true);
   trackUI();
   toast('실시간 위치 추적을 켰어요. 움직이면 판정이 바로 바뀌고, 더 엄격한 구역에 들어가면 진동으로 알려줘요.', 4000);
 }
@@ -1075,6 +1135,8 @@ function stopTrack(quiet) {
   if (trackId != null) navigator.geolocation.clearWatch(trackId);
   trackId = null; keepAwake(false); compass(false); gpsHeading = null;
   $('#navHud').classList.add('hidden');
+  satPoll(false);
+  if (meAnim) { cancelAnimationFrame(meAnim); meAnim = null; }
   if (headingMarker) { map.removeLayer(headingMarker); headingMarker = null; }
   trackUI();
   if (!quiet) toast('실시간 위치 추적을 껐어요.');
