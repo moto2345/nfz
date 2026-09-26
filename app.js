@@ -276,9 +276,25 @@ async function queryLayerOnce(zone, bbox, timeout) {
   return (r.result && r.result.featureCollection && r.result.featureCollection.features) || [];
 }
 
-async function analyze(lat, lon) {
-  const bbox = bboxAround(lat, lon, CFG.CHECK_RADIUS_M);
-  const settled = await Promise.allSettled(ZONES.map(z => queryLayer(z, bbox)));
+// 받아 둔 공역 자료: 받은 지점에서 반경 5km 안의 모든 구역 모양. 3km 안에서 움직이면 그대로 재사용(주변 구역까지 거리도 정확)
+let zoneCache = null;
+const ZONE_CACHE_M = 3000, ZONE_CACHE_MS = 10 * 60e3;
+function zoneCacheFor(lat, lon) {
+  const c = zoneCache;
+  if (!c || Date.now() - c.t > ZONE_CACHE_MS) return null;
+  const d = toLocal(lon, lat, c.lat, c.lon);
+  return Math.hypot(d[0], d[1]) <= ZONE_CACHE_M ? c : null;
+}
+async function analyze(lat, lon, opt = {}) {
+  let settled;
+  const cached = opt.cache && zoneCacheFor(lat, lon);
+  if (cached) settled = cached.settled;
+  else {
+    const bbox = bboxAround(lat, lon, CFG.CHECK_RADIUS_M);
+    settled = await Promise.allSettled(ZONES.map(z => queryLayer(z, bbox)));
+    // 필수 공역을 모두 받았을 때만 보관 (빠진 게 있으면 다음에 다시 받음)
+    if (!settled.some((x, i) => x.status === 'rejected' && decisive(ZONES[i]))) zoneCache = { lat, lon, t: Date.now(), settled };
+  }
   const inside = [], nearby = [], failed = [], fromNational = [];
   settled.forEach((s, i) => {
     const zone = ZONES[i];
@@ -660,7 +676,7 @@ buildLayers();
 let pinMarker = null, meMarker = null, meCircle = null, zoneGeo = L.layerGroup().addTo(map);
 let lastResult = null;
 
-map.on('click', e => checkAt(e.latlng.lat, e.latlng.lng));
+map.on('click', e => { pauseTrackFollow(); checkAt(e.latlng.lat, e.latlng.lng); });
 map.on('moveend', () => { const c = map.getCenter(); LS.set('mapView', { lat: c.lat, lng: c.lng, z: map.getZoom() }); });
 
 /* ───────── 하단 시트 ───────── */
@@ -736,13 +752,18 @@ async function checkAt(lat, lon, label, opt = {}) {
     pinMarker = L.marker([lat, lon], { bubblingMouseEvents: false }).addTo(map);
     pinMarker.on('click', e => { if (e && e.originalEvent && L.DomEvent) L.DomEvent.stopPropagation(e); if (sheet.classList.contains('collapsed')) setCollapsed(false); });
   }
-  pinLabel(null);
+  if (!opt.silent) pinLabel(null); // 조용한 재확인(실시간 추적 등)은 말풍선을 깜빡이지 않음
   if (!opt.silent) {
     zoneGeo.clearLayers();
     sheetHtml(`<div class="hint"><span class="spinner"></span>공역 정보를 확인하는 중…</div>`);
   }
 
-  const [res, addr] = await Promise.all([analyze(lat, lon), reverseGeocode(lat, lon)]);
+  const prev = lastResult;
+  const near = (m) => prev && prev.addr && Math.hypot(...toLocal(lon, lat, prev.lat, prev.lon)) < m;
+  const [res, addr] = await Promise.all([
+    analyze(lat, lon, { cache: opt.cache }),
+    opt.cache && near(150) ? Promise.resolve(prev.addr) : reverseGeocode(lat, lon) // 150m 안이면 주소도 그대로
+  ]);
   if (seq !== checkSeq) return;
   res.addr = addr; res.label = label || ''; res.acc = opt.acc; res.seq = seq;
   if (label === '내 위치') setMyAddress(addr);
@@ -761,9 +782,10 @@ async function checkAt(lat, lon, label, opt = {}) {
   if (notamData) { updateNotamButton(); autoOpenNotams(); }
 
   res.baseVerdict = res.verdict;
-  fetchWeather(lat, lon).then(w => {
+  const wxReuse = opt.cache && prev && prev.wx && prev.wxAt && Date.now() - prev.wxAt < 10 * 60e3 && near(5000);
+  (wxReuse ? Promise.resolve(prev.wx) : fetchWeather(lat, lon)).then(w => {
     if (seq !== checkSeq) return;
-    res.wx = w;
+    res.wx = w; res.wxAt = wxReuse ? prev.wxAt : Date.now(); // 날씨는 10분 안·5km 안이면 재사용
     showWeather(res);
   }).catch(() => {
     if (seq !== checkSeq) return;
@@ -943,7 +965,76 @@ function locateMe(opt = {}) {
     toast(err.code === 1 ? '위치 권한이 거부되었습니다. 브라우저 설정에서 허용해 주세요.' : '위치를 가져오지 못했습니다.');
   }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 });
 }
-$('#btnLocate').addEventListener('click', () => locateMe());
+$('#btnLocate').addEventListener('click', () => { if (trackId != null && !trackFollow) { trackFollow = true; trackLast = null; trackUI(); } locateMe(); });
+
+/* ───────── 실시간 위치 추적 (켜고 끌 수 있음) ─────────
+   켜면: 내 위치 점이 움직임을 따라가고 지도도 따라감. 20m 움직일 때마다 받아 둔 공역 자료로 휴대폰에서 바로 다시 판정
+   (서버에는 받아 둔 범위 3km를 벗어나거나 10분이 지났을 때만 다시 요청, 주소는 150m·날씨는 10분마다),
+   더 엄격한 구역에 들어가면 진동+알림. 지도를 손으로 옮기면 따라가기만 잠시 멈춤(버튼을 누르면 다시 따라감). */
+const TRACK_MOVE_M = 20, TRACK_MIN_MS = 3000; // 판정은 휴대폰에서 하므로 자주 해도 부담 없음
+let trackId = null, trackFollow = true, trackLast = null, trackAt = 0, trackCode = null, wakeLock = null;
+const VERDICT_RANK = { ok: 0, caution: 1, approval: 2, partial: 2, no: 3 };
+function distM(a, b) { const p = toLocal(b[1], b[0], a[0], a[1]); return Math.hypot(p[0], p[1]); }
+function trackUI() {
+  const b = $('#btnTrack');
+  b.classList.toggle('on', trackId != null && trackFollow);
+  b.classList.toggle('paused', trackId != null && !trackFollow);
+  b.setAttribute('aria-pressed', trackId != null ? 'true' : 'false');
+  b.setAttribute('aria-label', trackId == null ? '실시간 위치 추적 켜기' : trackFollow ? '실시간 위치 추적 끄기' : '다시 따라가기');
+}
+async function keepAwake(on) {
+  try {
+    if (on && 'wakeLock' in navigator && !wakeLock) { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); }
+    if (!on && wakeLock) { await wakeLock.release(); wakeLock = null; }
+  } catch (e) {}
+}
+function onTrackPos(p) {
+  const { latitude: lat, longitude: lon, accuracy } = p.coords;
+  showMe(lat, lon, accuracy);
+  $('#btnLocate').classList.add('found');
+  if (trackFollow && $('#tab-map').classList.contains('active')) setViewVisible([lat, lon], map.getZoom());
+  const moved = !trackLast || distM(trackLast, [lat, lon]) >= TRACK_MOVE_M;
+  if (trackFollow && moved && // 다른 지점을 보고 있는 동안(잠시 멈춤)에는 판정을 덮어쓰지 않음
+      Date.now() - trackAt >= (trackLast ? TRACK_MIN_MS : 0)) {
+    trackLast = [lat, lon]; trackAt = Date.now();
+    Promise.resolve(checkAt(lat, lon, '내 위치', { acc: accuracy, retried: true, silent: !!lastResult, cache: true })).then(() => {
+      if (!lastResult || lastResult.lat !== lat || lastResult.lon !== lon) return;
+      const code = lastResult.verdict.code;
+      // 더 엄격한 구역으로 들어가면 알림
+      if (trackCode != null && (VERDICT_RANK[code] || 0) > (VERDICT_RANK[trackCode] || 0) && code !== 'partial') {
+        toast(`⚠️ ${lastResult.verdict.title} — 지금 위치가 바뀌었어요`, 5000);
+        try { navigator.vibrate && navigator.vibrate([200, 100, 200]); } catch (e) {}
+      }
+      trackCode = code;
+    });
+  }
+}
+function startTrack() {
+  if (!navigator.geolocation) return toast('이 기기는 위치 기능을 지원하지 않습니다.');
+  trackFollow = true; trackLast = null; trackAt = 0; trackCode = lastResult && lastResult.label === '내 위치' ? lastResult.verdict.code : null;
+  trackId = navigator.geolocation.watchPosition(onTrackPos, err => {
+    if (err.code === 1) { stopTrack(); toast('위치 권한이 거부되었습니다. 브라우저 설정에서 허용해 주세요.'); }
+    else toast('위치 신호가 약합니다. 계속 찾는 중…');
+  }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
+  keepAwake(true);
+  trackUI();
+  toast('실시간 위치 추적을 켰어요. 움직이면 판정이 바로 바뀌고, 더 엄격한 구역에 들어가면 진동으로 알려줘요.', 4000);
+}
+function stopTrack(quiet) {
+  if (trackId != null) navigator.geolocation.clearWatch(trackId);
+  trackId = null; keepAwake(false); trackUI();
+  if (!quiet) toast('실시간 위치 추적을 껐어요.');
+}
+$('#btnTrack').addEventListener('click', () => {
+  if (trackId == null) startTrack();
+  else if (!trackFollow) { trackFollow = true; trackLast = null; trackAt = 0; trackUI(); if (meMarker) { const q = meMarker.getLatLng(); setViewVisible([q.lat, q.lng], map.getZoom()); onTrackPos({ coords: { latitude: q.lat, longitude: q.lng, accuracy: meCircle ? meCircle.getRadius() : 30 } }); } }
+  else stopTrack();
+});
+// 지도를 손으로 옮기거나 다른 지점을 누르면 따라가기·자동 판정을 잠시 멈춤 (추적 버튼을 누르면 다시)
+function pauseTrackFollow() { if (trackId != null && trackFollow) { trackFollow = false; trackUI(); } }
+map.on('dragstart', pauseTrackFollow);
+// 화면이 꺼졌다 다시 켜지면 화면 켜짐 유지를 다시 요청
+document.addEventListener('visibilitychange', () => { if (!document.hidden && trackId != null) keepAwake(true); });
 
 /* ───────── 검색 & 즐겨찾기 ───────── */
 const resultsBox = $('#searchResults');
@@ -1690,5 +1781,5 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
 }
 
 // 테스트용 노출
-window.__dz = { runDiag, sunTimesKST, nationalGet, containsPoint, distToBoundary, makeVerdict, ZONES, hiddenZones, overlayZone, drawZones, notamStatus, scheduleText, scheduleState, kstDayWindows, get notamData() { return notamData; } };
+window.__dz = { startTrack, stopTrack, get tracking() { return trackId != null; }, runDiag, sunTimesKST, nationalGet, containsPoint, distToBoundary, makeVerdict, ZONES, hiddenZones, overlayZone, drawZones, notamStatus, scheduleText, scheduleState, kstDayWindows, get notamData() { return notamData; } };
 })();
