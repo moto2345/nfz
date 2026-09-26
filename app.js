@@ -968,6 +968,8 @@ function locateMe(opt = {}) {
 // 나침반·드론 컴퍼스 보정 안내
 function openCompassHelp() { $('#compassModal').classList.remove('hidden'); $('#compassModal .modal-box').scrollTop = 0; }
 $('#btnCompassHelp').addEventListener('click', openCompassHelp);
+// 실시간 추적 정보창을 눌러도 뒤의 지도가 반응하지 않게 막음(보정 버튼은 그대로 동작)
+['click','dblclick','mousedown','pointerdown','touchstart','wheel','contextmenu'].forEach(t => $('#navHud').addEventListener(t, e => e.stopPropagation(), { passive: true }));
 $('#btnCompassHelp2').addEventListener('click', openCompassHelp);
 $('#btnCompassClose').addEventListener('click', () => $('#compassModal').classList.add('hidden'));
 $('#compassModal').addEventListener('click', e => { if (e.target.id === 'compassModal') $('#compassModal').classList.add('hidden'); });
