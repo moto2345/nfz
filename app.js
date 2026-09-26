@@ -448,7 +448,7 @@ const WX = { 0: '맑음', 1: '대체로 맑음', 2: '구름 조금', 3: '흐림'
 async function fetchWeather(lat, lon) {
   const u = 'https://api.open-meteo.com/v1/forecast?' + new URLSearchParams({
     latitude: lat.toFixed(4), longitude: lon.toFixed(4),
-    current: 'temperature_2m,precipitation,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m',
+    current: 'temperature_2m,precipitation,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl',
     hourly: 'precipitation_probability,precipitation', forecast_hours: '3',
     daily: 'sunrise,sunset', timezone: 'Asia/Seoul', wind_speed_unit: 'ms', forecast_days: '1'
   });
@@ -456,6 +456,7 @@ async function fetchWeather(lat, lon) {
   if (!r.ok) throw new Error('날씨 오류');
   const w = await r.json();
   w.kp = kp;
+  if (w.current) setPRef(w.current, lat, lon); // 기압계 고도 계산 기준으로도 씀
   if (kp) updateKpBadge(kp);
   return w;
 }
@@ -996,7 +997,7 @@ async function keepAwake(on) {
     if (!on && wakeLock) { await wakeLock.release(); wakeLock = null; }
   } catch (e) {}
 }
-/* 계기판: 방향(이동 중엔 GPS 진행 방향, 멈춰 있으면 휴대폰 나침반)·속도·고도(휴대폰 GPS, 해발)·GPS 정확도 */
+/* 계기판: 방향(이동 중엔 GPS 진행 방향, 멈춰 있으면 휴대폰 나침반)·속도·고도(기압계 또는 GPS, 해발)·GPS 정확도 */
 const DIR16 = ['북', '북북동', '북동', '동북동', '동', '동남동', '남동', '남남동', '남', '남남서', '남서', '서남서', '서', '서북서', '북서', '북북서'];
 let gpsHeading = null, compassHeading = null, prevFix = null, headingMarker = null, compassOn = false;
 function currentHeading() { return gpsHeading != null ? gpsHeading : compassHeading; }
@@ -1029,9 +1030,40 @@ function updateHud(c, t) {
   prevFix = { lat: c.latitude, lon: c.longitude, t };
   gpsHeading = spd != null && spd > 1 && c.heading != null && !isNaN(c.heading) ? c.heading : null; // 걷는 속도 이상일 때만 진행 방향 사용
   $('#hudSpd').textContent = spd == null || isNaN(spd) ? '-' : `${(spd * 3.6).toFixed(spd * 3.6 < 10 ? 1 : 0)} km/h`;
-  $('#hudAlt').textContent = c.altitude == null || isNaN(c.altitude) ? '-' : `${Math.round(c.altitude)} m`;
+  gpsAlt = c.altitude == null || isNaN(c.altitude) ? null : c.altitude;
+  lastPos = [c.latitude, c.longitude];
+  renderAlt();
   setAcc(c.accuracy);
   renderHeading();
+}
+/* 고도: 기압계가 있는 폰(안드로이드 앱)은 기압계 + 그 지역 해면기압(Open-Meteo)으로 계산 — GPS보다 훨씬 덜 흔들림.
+   없으면 GPS 고도. GPS 고도는 타원체 기준이라 우리나라에선 해발보다 20~30m 높게 나오므로, 앱(안드로이드 14+)이 알려 주는 지오이드 높이만큼 뺌 */
+let gpsAlt = null, lastPos = null, baroHpa = null, geoidN = null, pRef = null, pRefBusy = false, pRefTry = 0;
+function setPRef(cur, lat, lon) {
+  if (!(cur.pressure_msl > 900 && cur.pressure_msl < 1100)) return;
+  pRef = { p0: cur.pressure_msl, tC: isFinite(cur.temperature_2m) ? cur.temperature_2m : 15, lat, lon, t: Date.now() };
+}
+function pRefOk(pos) { return pRef && Date.now() - pRef.t < 3 * 3600e3 && (!pos || distM(pos, [pRef.lat, pRef.lon]) < 30000); }
+async function fetchPRef(lat, lon) {
+  if (pRefBusy) return; pRefBusy = true; pRefTry = Date.now();
+  try {
+    const r = await fetchT('https://api.open-meteo.com/v1/forecast?' + new URLSearchParams({ latitude: lat.toFixed(3), longitude: lon.toFixed(3), current: 'pressure_msl,temperature_2m' }), {}, 10000);
+    if (r.ok) { const j = await r.json(); if (j.current) setPRef(j.current, lat, lon); }
+  } catch (e) {} finally { pRefBusy = false; }
+}
+function baroAltitude(p) { // 측고 공식(현지 기온 반영)
+  return (Math.pow(pRef.p0 / p, 1 / 5.257) - 1) * (pRef.tC + 273.15) / 0.0065;
+}
+function renderAlt() {
+  let h = null, src = '';
+  if (baroHpa != null) {
+    if (pRefOk(lastPos)) { h = baroAltitude(baroHpa); src = '기압'; }
+    else if (lastPos && !pRefBusy && Date.now() - pRefTry > 60e3) fetchPRef(lastPos[0], lastPos[1]); // 1분에 한 번까지만 시도
+  }
+  if (h == null && gpsAlt != null) { h = gpsAlt - (geoidN || 0); src = 'GPS'; }
+  if (h == null) { $('#hudAlt').textContent = '-'; $('#hudAltSrc').textContent = ''; return; }
+  $('#hudAlt').textContent = `${Math.round(h)} m`;
+  $('#hudAltSrc').textContent = src;
 }
 // GPS 오차 색: 10m 이하 초록 · 30m 이하 주황 · 그 이상 빨강
 function setAcc(a) {
@@ -1045,11 +1077,14 @@ function satPoll(on) {
   const has = !!(window.NFZApp && window.NFZApp.gnss);
   $('#hudSatRow').classList.toggle('hidden', !has || !on);
   clearInterval(satTimer); satTimer = null;
+  baroHpa = null; geoidN = null;
   if (!has) return;
   try { on ? window.NFZApp.gnssStart() : window.NFZApp.gnssStop(); } catch (e) {}
   if (!on) return;
   const tick = () => {
     let g = null; try { g = JSON.parse(window.NFZApp.gnss()); } catch (e) {}
+    const nb = g && g.hpa > 300 ? +g.hpa : null, ng = g && g.geoid != null && isFinite(g.geoid) && Math.abs(g.geoid) < 120 ? +g.geoid : null;
+    baroHpa = nb; geoidN = ng; renderAlt(); // 기압은 앱에서 약 2초 평균한 값
     const el = $('#hudSat');
     if (!g || g.used < 0) { el.textContent = '찾는 중'; el.className = 'q-mid'; return; }
     el.textContent = `${g.used}개` + (g.seen > 0 ? ` / ${g.seen}` : '');

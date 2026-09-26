@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="하코 NFZ">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-  <link rel="stylesheet" href="style.css?v=46">
+  <link rel="stylesheet" href="style.css?v=47">
 </head>
 <body>
 
@@ -20,7 +20,7 @@
 <header class="appbar">
   <img src="icons/icon-192.png" alt="" class="appbar-logo">
   <h1>하코 NFZ 조회</h1>
-  <span class="badge">웹버전 v1.46</span>
+  <span class="badge">웹버전 v1.47</span>
   <button id="btnNotam" class="appbar-btn notam hidden" type="button" aria-label="항공고시보" title="드론 관련 항공고시보">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M10 20.5a2.2 2.2 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
     <span id="notamCount" class="cnt">0</span>
@@ -47,7 +47,7 @@
     <div class="hud-dir"><svg id="hudArrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 19 20l-7-4-7 4z" fill="currentColor"/></svg><b id="hudDir">-</b></div>
     <button id="btnCompassHelp" class="hud-help" type="button">🧭 방향이 이상하면 보정</button>
     <div><span>속도</span><b id="hudSpd">-</b></div>
-    <div><span>고도</span><b id="hudAlt">-</b></div>
+    <div><span>고도<small id="hudAltSrc"></small></span><b id="hudAlt">-</b></div>
     <div><span>GPS 오차</span><b id="hudAcc">-</b></div>
     <div id="hudSatRow" class="hidden"><span>위성</span><b id="hudSat">-</b></div>
   </div>
@@ -296,7 +296,7 @@
 <div id="toast" class="toast hidden"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="config.js?v=46"></script>
-<script src="app.js?v=46"></script>
+<script src="config.js?v=47"></script>
+<script src="app.js?v=47"></script>
 </body>
 </html>

@@ -256,6 +256,7 @@ a.btn{text-decoration:none;color:var(--primary)}
 .nav-hud div{display:flex;justify-content:space-between;gap:8px}
 .nav-hud span{color:var(--muted)}
 .nav-hud b{font-weight:800;color:#222}
+.nav-hud span small{margin-left:3px;font-size:9px;color:#90a4ae}
 .nav-hud .hud-dir{justify-content:flex-start;align-items:center;gap:5px;margin-bottom:2px;font-size:12px}
 .nav-hud .hud-dir svg{width:16px;height:16px;color:#1a73e8;transition:transform .3s}
 /* 내 위치 점의 방향 화살표 */
