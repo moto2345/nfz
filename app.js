@@ -1056,6 +1056,8 @@ function baroAltitude(p) { // 측고 공식(현지 기온 반영)
   return (Math.pow(pRef.p0 / p, 1 / 5.257) - 1) * (pRef.tC + 273.15) / 0.0065;
 }
 function renderAlt() {
+  $('#hudBaroRow').classList.toggle('hidden', baroHpa == null); // 기압계 값(hPa) — 기압계 있는 폰의 앱에서만
+  if (baroHpa != null) $('#hudBaro').textContent = `${baroHpa.toFixed(1)} hPa`;
   let h = null, src = '';
   if (baroHpa != null) {
     if (pRefOk(lastPos)) { h = baroAltitude(baroHpa); src = '기압'; }
@@ -1079,7 +1081,7 @@ function satPoll(on) {
   const has = !!(window.NFZApp && window.NFZApp.gnss);
   $('#hudSatRow').classList.toggle('hidden', !has || !on);
   clearInterval(satTimer); satTimer = null;
-  baroHpa = null; geoidN = null;
+  baroHpa = null; geoidN = null; $('#hudBaroRow').classList.add('hidden');
   if (!has) return;
   try { on ? window.NFZApp.gnssStart() : window.NFZApp.gnssStop(); } catch (e) {}
   if (!on) return;
