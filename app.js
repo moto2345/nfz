@@ -965,6 +965,12 @@ function locateMe(opt = {}) {
     toast(err.code === 1 ? '위치 권한이 거부되었습니다. 브라우저 설정에서 허용해 주세요.' : '위치를 가져오지 못했습니다.');
   }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 });
 }
+// 나침반·드론 컴퍼스 보정 안내
+function openCompassHelp() { $('#compassModal').classList.remove('hidden'); $('#compassModal .modal-box').scrollTop = 0; }
+$('#btnCompassHelp').addEventListener('click', openCompassHelp);
+$('#btnCompassHelp2').addEventListener('click', openCompassHelp);
+$('#btnCompassClose').addEventListener('click', () => $('#compassModal').classList.add('hidden'));
+$('#compassModal').addEventListener('click', e => { if (e.target.id === 'compassModal') $('#compassModal').classList.add('hidden'); });
 $('#btnLocate').addEventListener('click', () => { if (trackId != null && !trackFollow) { trackFollow = true; trackLast = null; trackUI(); } locateMe(); });
 
 /* ───────── 실시간 위치 추적 (켜고 끌 수 있음) ─────────
