@@ -974,7 +974,7 @@ $('#btnCompassHelp').addEventListener('click', openCompassHelp);
 $('#btnCompassHelp2').addEventListener('click', openCompassHelp);
 $('#btnCompassClose').addEventListener('click', () => $('#compassModal').classList.add('hidden'));
 $('#compassModal').addEventListener('click', e => { if (e.target.id === 'compassModal') $('#compassModal').classList.add('hidden'); });
-$('#btnLocate').addEventListener('click', () => { if (trackId != null && !trackFollow) { trackFollow = true; trackLast = null; trackUI(); } locateMe(); });
+$('#btnLocate').addEventListener('click', () => { if (trackId != null) { appZoomUntil = Date.now() + 1500; manualZoomAt = 0; if (!trackFollow) { trackFollow = true; trackLast = null; trackUI(); } } locateMe(); });
 
 /* ───────── 실시간 위치 추적 (켜고 끌 수 있음) ─────────
    켜면: 내 위치 점이 움직임을 따라가고 지도도 따라감. 20m 움직일 때마다 받아 둔 공역 자료로 휴대폰에서 바로 다시 판정
@@ -1028,6 +1028,7 @@ function updateHud(c, t) {
   }
   if (spd === undefined) { renderHeading(); setAcc(c.accuracy); return; }
   prevFix = { lat: c.latitude, lon: c.longitude, t };
+  if (spd != null && !isNaN(spd)) trackKmh = spd * 3.6;
   gpsHeading = spd != null && spd > 1 && c.heading != null && !isNaN(c.heading) ? c.heading : null; // 걷는 속도 이상일 때만 진행 방향 사용
   $('#hudSpd').textContent = spd == null || isNaN(spd) ? '-' : `${(spd * 3.6).toFixed(spd * 3.6 < 10 ? 1 : 0)} km/h`;
   gpsAlt = c.altitude == null || isNaN(c.altitude) ? null : c.altitude;
@@ -1126,13 +1127,34 @@ function animateMe(lat, lon, acc, dur) {
   meAnim = requestAnimationFrame(step);
 }
 // 결과창·검색창을 피해 보이는 지도 한가운데로, 같은 시간 동안 일정한 속도로 이동
-function followTo(latlng, dur) {
-  const z = map.getZoom(), H = map.getSize().y;
+function followTo(latlng, dur, zWant) {
+  const z = zWant != null ? zWant : map.getZoom(), H = map.getSize().y;
   const top = $('.searchbar').offsetTop + $('#searchForm').offsetHeight, bottom = H - (sheet.offsetHeight || 0);
   const offset = bottom > top ? H / 2 - (top + bottom) / 2 : 0;
   const c = map.unproject(map.project(latlng, z).add([0, offset]), z);
-  map.panTo(c, { animate: true, duration: dur, easeLinearity: 1, noMoveStart: true });
+  if (z !== map.getZoom()) { appZoomUntil = Date.now() + 1500; map.setView(c, z, { animate: true }); } // 축척이 바뀔 땐 확대·축소 애니메이션
+  else map.panTo(c, { animate: true, duration: dur, easeLinearity: 1, noMoveStart: true });
 }
+/* 속도에 맞춘 자동 축척 (내비처럼): 느리면 크게, 빠르면 넓게.
+   빨라질 땐 3초, 느려질 땐 10초 이어져야 바꿈(신호 대기마다 들락날락하지 않게). 손으로 확대·축소하면 30초 동안 멈춤 */
+const AUTO_ZOOM = [[8, 16], [30, 15], [60, 14], [Infinity, 13]]; // [이 속도(km/h) 미만, 줌]
+let trackKmh = null, autoZ = null, zCand = null, zCandAt = 0, manualZoomAt = 0, appZoomUntil = 0;
+function bandZoom(kmh) { for (const [lim, z] of AUTO_ZOOM) if (kmh < lim) return z; }
+function autoZoomTarget() {
+  if (trackKmh == null || Date.now() - manualZoomAt < 30000) return null; // null = 지금 축척 유지
+  let want = bandZoom(trackKmh);
+  if (autoZ == null) return (autoZ = want);
+  if (want > autoZ && bandZoom(trackKmh * 1.25) <= autoZ) want = autoZ; // 경계보다 20% 이상 느려져야 확대
+  if (want === autoZ) { zCand = null; return autoZ; }
+  if (zCand !== want) { zCand = want; zCandAt = Date.now(); }
+  if (Date.now() - zCandAt >= (want < autoZ ? 3000 : 10000)) { autoZ = want; zCand = null; }
+  return autoZ;
+}
+map.on('zoomstart', () => {
+  if (trackId == null || Date.now() < appZoomUntil) return;
+  if (Date.now() - manualZoomAt > 30000) toast('직접 축척을 바꿔서 자동 축척을 30초 동안 멈춰요', 2500);
+  manualZoomAt = Date.now(); autoZ = null; zCand = null; // 다시 켜질 땐 그때 속도에 맞는 축척으로 바로
+});
 function onTrackPos(p) {
   const { latitude: lat, longitude: lon, accuracy } = p.coords;
   const now = Date.now(), gap = lastFixAt ? (now - lastFixAt) / 1000 : 1;
@@ -1142,7 +1164,11 @@ function onTrackPos(p) {
   if (jump || !meMarker) showMe(lat, lon, accuracy); else animateMe(lat, lon, accuracy, dur);
   updateHud(p.coords, p.timestamp || now);
   $('#btnLocate').classList.add('found');
-  if (trackFollow && $('#tab-map').classList.contains('active')) { if (jump) setViewVisible([lat, lon], map.getZoom()); else followTo([lat, lon], dur); }
+  if (trackFollow && $('#tab-map').classList.contains('active')) {
+    const zt = autoZoomTarget();
+    if (jump) { if (zt != null && zt !== map.getZoom()) appZoomUntil = Date.now() + 1500; setViewVisible([lat, lon], zt != null ? zt : map.getZoom()); }
+    else followTo([lat, lon], dur, zt);
+  }
   const moved = !trackLast || distM(trackLast, [lat, lon]) >= TRACK_MOVE_M;
   if (trackFollow && moved && // 다른 지점을 보고 있는 동안(잠시 멈춤)에는 판정을 덮어쓰지 않음
       Date.now() - trackAt >= (trackLast ? TRACK_MIN_MS : 0)) {
@@ -1169,6 +1195,7 @@ function startTrack() {
   keepAwake(true);
   compass(true); // 버튼을 누른 순간에 켜야 아이폰에서 권한을 물을 수 있음
   gpsHeading = null; prevFix = null; lastFixAt = 0;
+  trackKmh = null; autoZ = null; zCand = null; manualZoomAt = 0;
   $('#navHud').classList.remove('hidden');
   satPoll(true);
   trackUI();
@@ -1186,7 +1213,7 @@ function stopTrack(quiet) {
 }
 $('#btnTrack').addEventListener('click', () => {
   if (trackId == null) startTrack();
-  else if (!trackFollow) { trackFollow = true; trackLast = null; trackAt = 0; trackUI(); if (meMarker) { const q = meMarker.getLatLng(); setViewVisible([q.lat, q.lng], map.getZoom()); onTrackPos({ coords: { latitude: q.lat, longitude: q.lng, accuracy: meCircle ? meCircle.getRadius() : 30 } }); } }
+  else if (!trackFollow) { trackFollow = true; trackLast = null; trackAt = 0; manualZoomAt = 0; trackUI(); if (meMarker) { const q = meMarker.getLatLng(); setViewVisible([q.lat, q.lng], map.getZoom()); onTrackPos({ coords: { latitude: q.lat, longitude: q.lng, accuracy: meCircle ? meCircle.getRadius() : 30 } }); } }
   else stopTrack();
 });
 // 지도를 손으로 옮기거나 다른 지점을 누르면 따라가기·자동 판정을 잠시 멈춤 (추적 버튼을 누르면 다시)
