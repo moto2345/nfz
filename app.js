@@ -650,7 +650,7 @@ function weatherHtml(w) {
 }
 
 /* ───────── 지도 ───────── */
-const map = L.map('map', { zoomControl: false, attributionControl: false }).setView(CFG.DEFAULT_CENTER, CFG.DEFAULT_ZOOM);
+const map = L.map('map', { zoomControl: false, attributionControl: false, zoomSnap: 0.5 }).setView(CFG.DEFAULT_CENTER, CFG.DEFAULT_ZOOM);
 const zoomCtl = L.control.zoom({ position: 'topright' }); // 오른쪽 레이어 버튼 아래
 let baseLayers = {}, overlayLayers = {}, layerCtl;
 
@@ -1401,18 +1401,18 @@ function followTo(latlng, dur, zWant) {
   else map.panTo(c, { animate: true, duration: dur, easeLinearity: 1, noMoveStart: true });
 }
 /* 속도에 맞춘 자동 축척 (내비처럼): 느리면 크게, 빠르면 넓게.
-   빨라질 땐 3초, 느려질 땐 10초 이어져야 바꿈(신호 대기마다 들락날락하지 않게). 손으로 확대·축소하면 30초 동안 멈춤 */
-const AUTO_ZOOM = [[8, 18], [30, 17], [60, 16], [Infinity, 15]]; // [이 속도(km/h) 미만, 줌]
+   빨라질 땐 1.5초, 느려질 땐 4초 이어지면 바꿈(신호 대기마다 들락날락하지 않게). 손으로 확대·축소하면 30초 동안 멈춤 */
+const AUTO_ZOOM = [[5, 18], [12, 17.5], [20, 17], [30, 16.5], [45, 16], [60, 15.5], [80, 15], [100, 14.5], [Infinity, 14]]; // [이 속도(km/h) 미만, 줌]
 let trackKmh = null, autoZ = null, zCand = null, zCandAt = 0, manualZoomAt = 0, appZoomUntil = 0;
 function bandZoom(kmh) { for (const [lim, z] of AUTO_ZOOM) if (kmh < lim) return z; }
 function autoZoomTarget() {
   if (trackKmh == null || Date.now() - manualZoomAt < 30000) return null; // null = 지금 축척 유지
   let want = bandZoom(trackKmh);
   if (autoZ == null) return (autoZ = want);
-  if (want > autoZ && bandZoom(trackKmh * 1.25) <= autoZ) want = autoZ; // 경계보다 20% 이상 느려져야 확대
+  if (want > autoZ && bandZoom(trackKmh * 1.1) <= autoZ) want = autoZ; // 경계보다 10% 이상 느려져야 확대(경계에서 들락날락 방지)
   if (want === autoZ) { zCand = null; return autoZ; }
   if (zCand !== want) { zCand = want; zCandAt = Date.now(); }
-  if (Date.now() - zCandAt >= (want < autoZ ? 3000 : 10000)) { autoZ = want; zCand = null; }
+  if (Date.now() - zCandAt >= (want < autoZ ? 1500 : 4000)) { autoZ = want; zCand = null; }
   return autoZ;
 }
 map.on('zoomstart', () => {
