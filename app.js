@@ -530,27 +530,50 @@ $('#kpBadge').addEventListener('click', e => {
 });
 $('#kpCard').addEventListener('click', closeKpCard);
 document.addEventListener('pointerdown', e => { if (!e.target.closest('#kpCard, #kpBadge')) closeKpCard(); }, true);
-// 기체별 최대 내풍 성능(제조사 공식 사양, m/s) — 강풍 판정 기준
+// 기체별 공식 사양 (DJI 한국 사이트 스펙, 2026-09 확인)
+// wind: 내풍 가능 최대 풍속(m/s) — 강풍 판정 / g: 표준 이륙 무게 / ft: 최대 비행시간(분) — 타이머 알림 / tmin: 최저 작동 온도(℃)
 const DRONES = [
   { id: 'std', name: '기체 선택 안 함 (250g급 기준)', wind: 10.7 },
-  { id: 'mini3', name: 'DJI Mini 3', wind: 10.7, g: 248 },
-  { id: 'mini3pro', name: 'DJI Mini 3 Pro', wind: 10.7, g: 249 },
-  { id: 'mini4k', name: 'DJI Mini 4K', wind: 10.7, g: 249 },
-  { id: 'mini4pro', name: 'DJI Mini 4 Pro', wind: 10.7, g: 249 },
-  { id: 'mini5pro', name: 'DJI Mini 5 Pro', wind: 12, g: 249 },
-  { id: 'neo', name: 'DJI Neo', wind: 8, g: 135 },
-  { id: 'flip', name: 'DJI Flip', wind: 10.7, g: 249 },
-  { id: 'air3', name: 'DJI Air 3', wind: 12, g: 720 },
-  { id: 'air3s', name: 'DJI Air 3S', wind: 12, g: 724 },
-  { id: 'mavic3', name: 'DJI Mavic 3 Classic', wind: 12, g: 895 },
-  { id: 'mavic3pro', name: 'DJI Mavic 3 Pro', wind: 12, g: 958 },
-  { id: 'mavic4pro', name: 'DJI Mavic 4 Pro', wind: 12, g: 1063 },
-  { id: 'avata2', name: 'DJI Avata 2', wind: 10.7, g: 377 },
-  { id: 'inspire2', name: 'DJI Inspire 2', wind: 10, g: 3440 },
-  { id: 'inspire3', name: 'DJI Inspire 3', wind: 12, g: 3995, note: '이착륙 12m/s · 비행 중 14m/s' },
+  { id: 'mini2se', name: 'DJI Mini 2 SE', wind: 10.7, g: 246, ft: 31, tmin: 0 },
+  { id: 'mini3', name: 'DJI Mini 3', wind: 10.7, g: 248, ft: 38, tmin: -10 },
+  { id: 'mini3pro', name: 'DJI Mini 3 Pro', wind: 10.7, g: 249, ft: 34, tmin: -10 },
+  { id: 'mini4k', name: 'DJI Mini 4K', wind: 10.7, g: 249, ft: 31 },
+  { id: 'mini4pro', name: 'DJI Mini 4 Pro', wind: 10.7, g: 249, ft: 34, tmin: -10 },
+  { id: 'mini5pro', name: 'DJI Mini 5 Pro', wind: 12, g: 249.9, ft: 36, tmin: -10, gNote: '공식 무게 249.9g ±4g — 250g을 넘을 수 있어요' },
+  { id: 'lito1', name: 'DJI Lito 1', wind: 10.7, g: 249, ft: 36, tmin: 0, gNote: '최대 이륙 무게는 약 340g' },
+  { id: 'litox1', name: 'DJI Lito X1', wind: 10.7, g: 249, ft: 36, tmin: -10, gNote: '최대 이륙 무게는 약 340g' },
+  { id: 'neo', name: 'DJI Neo', wind: 8, g: 135, ft: 18, tmin: -10 },
+  { id: 'neo2', name: 'DJI Neo 2', wind: 10.7, g: 151, ft: 19, tmin: -10 },
+  { id: 'flip', name: 'DJI Flip', wind: 10.7, g: 249, ft: 31, tmin: -10 },
+  { id: 'air3', name: 'DJI Air 3', wind: 12, g: 720, ft: 46, tmin: -10 },
+  { id: 'air3s', name: 'DJI Air 3S', wind: 12, g: 724, ft: 45, tmin: -10 },
+  { id: 'mavic3', name: 'DJI Mavic 3 Classic', wind: 12, g: 895, ft: 46, tmin: -10 },
+  { id: 'mavic3pro', name: 'DJI Mavic 3 Pro', wind: 12, g: 958, ft: 43, tmin: -10 },
+  { id: 'mavic4pro', name: 'DJI Mavic 4 Pro', wind: 12, g: 1063, ft: 51, tmin: -10 },
+  { id: 'avata2', name: 'DJI Avata 2', wind: 10.7, g: 377, ft: 23, tmin: -10 },
+  { id: 'avata360', name: 'DJI Avata 360', wind: 10.7, g: 455, ft: 23, tmin: -10 },
+  { id: 'inspire2', name: 'DJI Inspire 2', wind: 10, g: 3440, ft: 27, tmin: -20 },
+  { id: 'inspire3', name: 'DJI Inspire 3', wind: 12, g: 3995, ft: 28, tmin: -20, note: '이착륙 12m/s · 비행 중 14m/s' },
   { id: 'etc-s', name: '기타 소형 (250g 미만)', wind: 8 },
   { id: 'etc-m', name: '기타 중형 (250g~2kg)', wind: 10 }
 ];
+// 무게로 본 조종자 자격·기체 신고 (비사업용 기준, 2026-09 현재)
+function droneRules(d) {
+  if (!d.g) return '';
+  const cert = d.g <= 250 ? '조종자 증명 불필요 (250g 이하)' : d.g <= 2000 ? '4종 조종자 증명 필요 (온라인 교육)' : d.g <= 7000 ? '3종 조종자 증명 필요' : d.g <= 25000 ? '2종 조종자 증명 필요' : '1종 조종자 증명 필요';
+  const reg = d.g > 2000 ? ' · 기체 신고 필요' : '';
+  return `🪪 ${cert}${reg}${d.gNote ? ` (${d.gNote}, 배터리·부착물로 무거워지면 기준이 바뀌어요)` : ''}${d.g <= 2000 ? ' · 2kg 이하 비사업용 기체도 신고 대상에 넣는 개정안이 입법예고 중이에요' : ''}`;
+}
+// 기온 판정: 기체 최저 작동 온도보다 낮으면 비행 불가, 10℃ 미만은 배터리 주의, 40℃ 이상은 작동 온도 밖
+function tempIssue(tC, d = currentDrone()) {
+  if (!isFinite(tC)) return null;
+  const tmin = d.tmin != null ? d.tmin : null;
+  if (tmin != null && tC < tmin) return { lv: 'bad', txt: `작동 온도 밖 (최저 ${tmin}℃)`, why: `작동 온도(최저 ${tmin}℃)보다 낮아` };
+  if (tC >= 40) return { lv: 'bad', txt: '작동 온도 밖 (최고 40℃)', why: '작동 온도(최고 40℃)를 넘어' };
+  if (tC < 10) return { lv: 'mid', txt: '배터리 주의' };
+  if (tC >= 35) return { lv: 'mid', txt: '과열 주의' };
+  return null;
+}
 const currentDrone = () => DRONES.find(d => d.id === LS.get('drone', 'std')) || DRONES[0];
 const kstNowHM = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(11, 16);
 // 일출·일몰(한국시간 HH:MM)을 휴대폰에서 직접 계산 — 날씨를 못 받아와도 야간 판정은 하도록
@@ -580,6 +603,7 @@ function weatherIssues(w) {
     limit: L,
     rain: c.precipitation > 0 || (w.hourly && w.hourly.precipitation && (w.hourly.precipitation[0] || 0) >= 0.3) || [51, 53, 55, 61, 63, 65, 66, 67, 71, 73, 75, 77, 80, 81, 82, 85, 86, 95, 96, 99].includes(c.weather_code),
     fog: c.weather_code === 45 || c.weather_code === 48,
+    temp: tempIssue(c.temperature_2m),
     // 앞으로 3시간: 비 올 확률(최대)·예상 강수량(합)
     rainProb: w.hourly && w.hourly.precipitation_probability ? Math.max(...w.hourly.precipitation_probability.map(v => v || 0)) : null,
     rainMm: w.hourly && w.hourly.precipitation ? Math.round(w.hourly.precipitation.reduce((a, v) => a + (v || 0), 0) * 10) / 10 : 0
@@ -596,6 +620,9 @@ function weatherHtml(w) {
   if (iss.rain) notes.push('🌧 강수가 있습니다. 방수 기체가 아니면 비행을 피하세요.');
   else if (iss.rainProb >= 40 || iss.rainMm >= 0.3) notes.push(`🌦 3시간 안에 비 올 확률 ${iss.rainProb != null ? iss.rainProb + '%' : '있음'}${iss.rainMm ? ` (예상 ${iss.rainMm}mm)` : ''} — 비행 전 하늘을 꼭 확인하세요.`);
   if (iss.fog) notes.push('🌫 안개로 가시권 확보가 어렵습니다.');
+  if (iss.temp && iss.temp.lv === 'bad') notes.push(`🥶 기온 ${Math.round(c.temperature_2m)}℃ — ${who}의 ${iss.temp.why} 비행하면 안 돼요.`);
+  else if (iss.temp && iss.temp.txt === '배터리 주의') notes.push(`🔋 기온 ${Math.round(c.temperature_2m)}℃ — 추우면 배터리 전압이 급격히 떨어져요. 이륙 전 배터리를 따뜻하게(20℃ 이상) 두고, 평소보다 일찍 복귀하세요.`);
+  else if (iss.temp) notes.push(`🌡 기온 ${Math.round(c.temperature_2m)}℃ — 기체·배터리 과열에 주의하세요.`);
   if (w.kp) {
     const k = w.kp.now, m = w.kp.max6;
     if (k >= 5) notes.push(`🧲 지자기 폭풍(Kp ${k}) — GPS·나침반이 불안정할 수 있어요. 수동(ATTI) 조종에 자신 없으면 비행을 미루세요.`);
@@ -618,7 +645,8 @@ function weatherHtml(w) {
     <label class="drone-pick">내 기체
       <select id="dronePick">${DRONES.map(d => `<option value="${d.id}"${d.id === dr.id ? ' selected' : ''}>${esc(d.name)}</option>`).join('')}</select>
     </label>
-    <p class="muted small">바람 기준: 돌풍 ${dr.wind}m/s 또는 평균 ${(dr.wind * 0.75).toFixed(1)}m/s 이상이면 강풍${dr.note ? ` (${dr.note})` : ''}${dr.g ? ` · ${dr.g >= 1000 ? (dr.g / 1000).toFixed(2) + 'kg' : dr.g + 'g'}` : ''}</p>`;
+    <p class="muted small">바람 기준: 돌풍 ${dr.wind}m/s 또는 평균 ${(dr.wind * 0.75).toFixed(1)}m/s 이상이면 강풍${dr.note ? ` (${dr.note})` : ''}${dr.g ? ` · ${dr.g >= 1000 ? (dr.g / 1000).toFixed(2) + 'kg' : dr.g + 'g'}` : ''}${dr.ft ? ` · 최대 비행 ${dr.ft}분` : ''}${dr.tmin != null ? ` · 작동 ${dr.tmin}~40℃` : ''}</p>
+    ${dr.g ? `<p class="muted small">${droneRules(dr)}</p>` : ''}`;
 }
 
 /* ───────── 지도 ───────── */
@@ -853,6 +881,7 @@ function applyWeatherToVerdict(r, iss) {
   if (iss.windStrong) probs.push(`강풍(${currentDrone().id === 'std' ? '250g급' : currentDrone().name} 기준)`);
   if (iss.rain) probs.push('비·눈');
   if (iss.fog) probs.push('안개');
+  if (iss.temp && iss.temp.lv === 'bad') probs.push('기온(' + iss.temp.txt + ')');
   if (r === lastResult) { const b = $('#btnWx'); b.classList.toggle('warn', probs.length > 0); b.title = probs.length ? '지금: ' + probs.join(', ') : '현재 날씨'; }
   if (!probs.length) return;
   const v = r.verdict, el = $('#sheetBody .verdict');
@@ -1291,9 +1320,9 @@ function renderHudExtra() {
     const strong = w.wg >= L || w.ws >= L * 0.75, mid = w.wg >= L * 0.65 || w.ws >= L * 0.5;
     hudRow('hudWind', `${w.ws.toFixed(1)} m/s`, strong ? 'q-bad' : mid ? 'q-mid' : 'q-good');
     hudRow('hudWindUp', isFinite(w.wu) ? `${w.wu.toFixed(1)} m/s` : null, w.wu >= L * 0.75 ? 'q-bad' : w.wu >= L * 0.5 ? 'q-mid' : 'q-good');
-    const t = Math.round(w.tC);
-    hudRow('hudTemp', isFinite(w.tC) ? `${t}℃` + (t < 10 ? ' <small>배터리 주의</small>' : t >= 35 ? ' <small>과열 주의</small>' : '') : null,
-      t < 0 ? 'q-bad' : t < 10 || t >= 35 ? 'q-mid' : '');
+    const t = Math.round(w.tC), ti = tempIssue(w.tC);
+    hudRow('hudTemp', isFinite(w.tC) ? `${t}℃` + (ti ? ` <small>${ti.lv === 'bad' ? '작동 온도 밖' : ti.txt}</small>` : '') : null,
+      ti ? (ti.lv === 'bad' ? 'q-bad' : 'q-mid') : '');
   } else ['hudWind', 'hudWindUp', 'hudTemp'].forEach(id => hudRow(id, null));
   // 가장 가까운 제한구역 (비행승인 필요 이상)
   const z = nearZone(lat, lon);
@@ -1565,14 +1594,26 @@ function switchTab(id) { $(`.tabbar button[data-tab="${id}"]`).click(); }
 let timerInt;
 function startTimer() {
   if (LS.get('flightStart', null)) { toast('이미 비행 타이머가 켜져 있습니다.'); switchTab('tab-map'); return; }
-  LS.set('flightStart', { t: Date.now(), result: lastResult ? slimResult(lastResult) : null });
-  runTimer(); switchTab('tab-map'); toast('비행 타이머를 시작했습니다. 안전 비행하세요!');
+  const d = currentDrone();
+  LS.set('flightStart', { t: Date.now(), result: lastResult ? slimResult(lastResult) : null, ft: d.ft || null, dn: d.ft ? d.name : '' });
+  runTimer(); switchTab('tab-map');
+  toast(d.ft ? `비행 타이머 시작 — ${d.name} 기준 ${Math.round(d.ft * 0.7)}분에 복귀 알림을 드려요.` : '비행 타이머를 시작했습니다. 안전 비행하세요! (날씨 창에서 기체를 고르면 복귀 알림을 받을 수 있어요)', 4000);
 }
 function runTimer() {
   const st = LS.get('flightStart', null);
   if (!st) { $('#timerBanner').classList.add('hidden'); clearInterval(timerInt); return; }
   $('#timerBanner').classList.remove('hidden');
-  const tick = () => { const s = Math.floor((Date.now() - st.t) / 1000); $('#timerText').textContent = (s >= 3600 ? Math.floor(s / 3600) + ':' : '') + pad(Math.floor(s / 60) % 60) + ':' + pad(s % 60); };
+  // 기체 최대 비행시간(무풍·새 배터리 기준)의 70%에 복귀 준비, 90%에 즉시 착륙 알림 (각 1번)
+  const tick = () => {
+    const s = Math.floor((Date.now() - st.t) / 1000);
+    $('#timerText').textContent = (s >= 3600 ? Math.floor(s / 3600) + ':' : '') + pad(Math.floor(s / 60) % 60) + ':' + pad(s % 60) + (st.ft ? ` / ${st.ft}분` : '');
+    if (!st.ft) return;
+    const k = s / (st.ft * 60), bn = $('#timerBanner');
+    bn.classList.toggle('warn', k >= 0.7 && k < 0.9); bn.classList.toggle('danger', k >= 0.9);
+    const alert = (key, msg, pat) => { if (st[key]) return; st[key] = 1; LS.set('flightStart', st); toast(msg, 8000); try { navigator.vibrate && navigator.vibrate(pat); } catch (e) {} };
+    if (k >= 0.9) alert('a90', `🛬 ${st.dn} 최대 비행시간의 90% — 지금 바로 착륙하세요!`, [400, 150, 400, 150, 400]);
+    else if (k >= 0.7) alert('a70', `🔋 ${st.dn} 최대 비행시간의 70% — 복귀를 준비하세요. 바람이 세거나 추우면 배터리가 더 빨리 닳아요.`, [250, 120, 250]);
+  };
   tick(); clearInterval(timerInt); timerInt = setInterval(tick, 1000);
 }
 $('#btnTimerStop').addEventListener('click', () => {
