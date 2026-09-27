@@ -2,7 +2,7 @@
 (function () {
 'use strict';
 
-const CFG = Object.assign({ VWORLD_KEY: '', CHECK_RADIUS_M: 5000, DEFAULT_CENTER: [37.5665, 126.978], DEFAULT_ZOOM: 11 }, window.APP_CONFIG || {});
+const CFG = Object.assign({ VWORLD_KEY: '', ITS_KEY: 'afe05c978cf44d388eb4c73f8dde5457', CHECK_RADIUS_M: 5000, DEFAULT_CENTER: [37.5665, 126.978], DEFAULT_ZOOM: 11 }, window.APP_CONFIG || {});
 
 /* ───────── 저장소 ───────── */
 const LS = {
@@ -644,6 +644,7 @@ function buildLayers() {
   map.removeControl(zoomCtl); zoomCtl.addTo(map); // 레이어 버튼을 다시 만들어도 확대·축소가 늘 그 아래에 오도록
   setTimeout(fitMapButtons, 0);
   if (key) for (const z of ZONES) if (!z.optional || verified.has(z.id)) addZoneOverlay(z);
+  addCctvOverlay();
 }
 // 지도 무늬 칸(타일)을 못 받아오면 잠시 뒤 최대 3번 다시 요청 → 빈 네모 칸 방지
 function retryTiles(layer, max = 3) {
@@ -692,6 +693,131 @@ function onOverlayToggle(e, on) {
 }
 map.on('overlayadd', e => onOverlayToggle(e, true));
 map.on('overlayremove', e => onOverlayToggle(e, false));
+
+/* ───────── 교통 CCTV (국가교통정보센터 ITS · 고속도로·국도) ─────────
+   ITS 조회는 한 달 100건 한도라 아껴 씀:
+   · CCTV 위치 목록은 GitHub 자동 작업이 일주일에 한 번 받아 cctv.json으로 저장 → 지도에 표시할 땐 조회 0건
+   · 영상을 '재생' 누를 때만 그 CCTV 하나의 영상 주소를 1건 조회 (받은 주소는 90분간 재사용)
+   · 남은 횟수 = 한도 − 자동 작업 사용 − 이 기기 사용 (다른 사람이 쓴 건 알 수 없어 '추정') */
+const CCTV_URL = 'https://raw.githubusercontent.com/moto2345/nfz-android/main/cctv.json';
+const CCTV_MINZOOM = 11, CCTV_URL_TTL = 90 * 60e3;
+const cctvLayer = L.layerGroup();
+let cctvOn = false, cctvTimer = null, cctvHintAt = 0, cctvList = null, cctvLoading = null;
+function addCctvOverlay() {
+  if (!layerCtl) return;
+  layerCtl.addOverlay(cctvLayer, '<span class="sw cctv-sw">📹</span> 교통 CCTV (고속도로·국도)');
+  if (LS.get('layerOn', {}).CCTV) { quietToggle = true; cctvLayer.addTo(map); quietToggle = false; cctvOn = true; cctvRefresh(); }
+}
+map.on('overlayadd', e => { if (e.layer !== cctvLayer) return; cctvOn = true; const s = LS.get('layerOn', {}); s.CCTV = true; LS.set('layerOn', s); cctvRefresh(true); });
+map.on('overlayremove', e => { if (e.layer !== cctvLayer) return; cctvOn = false; const s = LS.get('layerOn', {}); s.CCTV = false; LS.set('layerOn', s); cctvLayer.clearLayers(); closeCctv(); });
+map.on('moveend', () => { if (cctvOn) { clearTimeout(cctvTimer); cctvTimer = setTimeout(cctvRefresh, 250); } });
+function loadCctvList() {
+  if (cctvList && Date.now() - cctvList.at < 6 * 3600e3) return Promise.resolve(cctvList);
+  if (cctvLoading) return cctvLoading;
+  cctvLoading = fetchT(CCTV_URL + '?t=' + Math.floor(Date.now() / 3600e3), {}, 15000).then(r => r.ok ? r.json() : null).then(j => {
+    if (!j || !Array.isArray(j.items)) throw new Error('목록 없음');
+    j.at = Date.now(); cctvList = j;
+    try { localStorage.setItem('cctvList', JSON.stringify(j)); } catch (e) {}
+    return j;
+  }).catch(() => { const c = LS.get('cctvList', null); if (c && Array.isArray(c.items)) { cctvList = c; return c; } return null; })
+    .finally(() => { cctvLoading = null; });
+  return cctvLoading;
+}
+const cctvIcon = L.divIcon({ className: 'cctv-mk', html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8.5h10.5a1.5 1.5 0 0 1 1.5 1.5v1.2l3.6-2.1a.6.6 0 0 1 .9.5v6.8a.6.6 0 0 1-.9.5L16 14.8V16a1.5 1.5 0 0 1-1.5 1.5H4A1.5 1.5 0 0 1 2.5 16v-6A1.5 1.5 0 0 1 4 8.5z" fill="currentColor"/></svg>', iconSize: [26, 26], iconAnchor: [13, 13] });
+async function cctvRefresh(fromToggle) {
+  if (!cctvOn) return;
+  if (map.getZoom() < CCTV_MINZOOM) {
+    cctvLayer.clearLayers();
+    if (fromToggle || Date.now() - cctvHintAt > 60e3) { cctvHintAt = Date.now(); toast('지도를 조금 더 확대하면 교통 CCTV가 보여요'); }
+    return;
+  }
+  const list = await loadCctvList();
+  if (!cctvOn) return;
+  if (!list) { toast('교통 CCTV 목록을 불러오지 못했어요.'); return; }
+  const bd = map.getBounds().pad(0.15);
+  cctvLayer.clearLayers();
+  for (const c of list.items) if (bd.contains([c.lat, c.lon]))
+    L.marker([c.lat, c.lon], { icon: cctvIcon, title: c.n, keyboard: false }).on('click', () => openCctv(c)).addTo(cctvLayer);
+}
+// 이번 달 사용량(추정)
+const monthKST = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 7);
+function itsDeviceUse() { const u = LS.get('itsUse', null); return u && u.m === monthKST() ? u.n : 0; }
+function itsUseOne() { LS.set('itsUse', { m: monthKST(), n: itsDeviceUse() + 1 }); }
+function itsLeft() {
+  const u = cctvList && cctvList.apiUse, limit = (u && u.limit) || 100;
+  const bot = u && u.month === monthKST() ? u.n : 0;
+  return { limit, left: Math.max(0, limit - bot - itsDeviceUse()) };
+}
+const cctvKey = c => 'cctvU:' + c.n + '@' + c.lat + ',' + c.lon;
+async function cctvStreamUrl(c) {
+  const hit = LS.get(cctvKey(c), null);
+  if (hit && Date.now() - hit.t < CCTV_URL_TTL) return hit.u;
+  const d = 0.003, q = { apiKey: CFG.ITS_KEY, type: c.t || 'its', cctvType: '4', getType: 'json',
+    minX: (c.lon - d).toFixed(6), maxX: (c.lon + d).toFixed(6), minY: (c.lat - d).toFixed(6), maxY: (c.lat + d).toFixed(6) };
+  itsUseOne(); // 응답과 상관없이 호출 1건 사용
+  const r = await fetchT('https://openapi.its.go.kr:9443/cctvInfo?' + new URLSearchParams(q), {}, 12000);
+  const j = r.ok ? await r.json() : null;
+  const data = j && j.response && Array.isArray(j.response.data) ? j.response.data : null;
+  if (!data) throw new Error((j && j.response && (j.response.resultMsg || j.response.message)) || '조회 실패');
+  let best = null, bd = Infinity;
+  for (const x of data) { if (!x.cctvurl) continue; const dd = Math.abs(+x.coordy - c.lat) + Math.abs(+x.coordx - c.lon) + (String(x.cctvname).trim() === c.n ? 0 : 1); if (dd < bd) { bd = dd; best = x; } }
+  if (!best) throw new Error('영상 주소 없음');
+  LS.set(cctvKey(c), { u: best.cctvurl, t: Date.now() });
+  return best.cctvurl;
+}
+function cctvInfoLine() {
+  const { limit, left } = itsLeft();
+  $('#cctvUse').innerHTML = `이번 달 남은 영상 조회 <b class="${left <= 10 ? 'q-bad' : left <= 30 ? 'q-mid' : ''}">약 ${left}회</b> / ${limit}회 <small>(추정 · 재생 1번 = 1회, 90분 안에 같은 CCTV 다시 보기는 무료 · 매달 1일 초기화)</small>`;
+}
+function openCctv(c) {
+  closeCctv();
+  cctvNow = c;
+  $('#cctvName').textContent = c.n;
+  const cached = LS.get(cctvKey(c), null), free = cached && Date.now() - cached.t < CCTV_URL_TTL;
+  const { left } = itsLeft();
+  const msg = $('#cctvMsg'); msg.classList.remove('hidden');
+  msg.innerHTML = free || left > 0
+    ? `<button type="button" class="btn primary" id="cctvPlay">▶ 실시간 영상 보기${free ? ' <small>(추가 사용 없음)</small>' : ''}</button>`
+    : '이번 달 영상 조회 한도를 다 썼어요.<br>다음 달 1일에 다시 볼 수 있어요.';
+  cctvInfoLine();
+  $('#cctvPanel').classList.remove('hidden');
+  const pb = $('#cctvPlay'); if (pb) pb.onclick = () => playCctv(c);
+}
+// 영상 창
+let hlsLoad = null, hlsInst = null, cctvNow = null;
+const loadHls = () => window.Hls ? Promise.resolve() : (hlsLoad = hlsLoad || new Promise((res, rej) => {
+  const s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.15/hls.min.js'; s.onload = res; s.onerror = () => { hlsLoad = null; rej(new Error('player')); }; document.head.appendChild(s);
+}));
+function stopCctvVideo() {
+  if (hlsInst) { try { hlsInst.destroy(); } catch (e) {} hlsInst = null; }
+  const v = $('#cctvVideo'); v.onplaying = null; v.onerror = null; v.removeAttribute('src'); try { v.load(); } catch (e) {}
+}
+function closeCctv() { stopCctvVideo(); cctvNow = null; $('#cctvPanel').classList.add('hidden'); }
+async function playCctv(c) {
+  if (cctvNow !== c) return;
+  const msg = $('#cctvMsg'); msg.textContent = '영상 불러오는 중…'; msg.classList.remove('hidden');
+  stopCctvVideo();
+  const v = $('#cctvVideo');
+  let url;
+  try { url = await cctvStreamUrl(c); }
+  catch (e) { if (cctvNow === c) { msg.textContent = '영상 주소를 받지 못했어요. ' + (/한도|limit|초과/i.test(e.message) ? '이번 달 조회 한도를 넘었을 수 있어요.' : '잠시 후 다시 시도해 주세요.'); cctvInfoLine(); } return; }
+  cctvInfoLine();
+  if (cctvNow !== c) return;
+  const fail = () => { if (cctvNow !== c) return; try { localStorage.removeItem(cctvKey(c)); } catch (e) {} msg.textContent = '영상을 재생하지 못했어요 (점검 중이거나 연결이 불안정할 수 있어요).'; };
+  v.onplaying = () => { if (cctvNow === c) msg.classList.add('hidden'); };
+  try { await loadHls(); } catch (e) {}
+  if (cctvNow !== c) return;
+  if (window.Hls && Hls.isSupported()) {
+    hlsInst = new Hls({ maxBufferLength: 20, backBufferLength: 10 });
+    hlsInst.on(Hls.Events.ERROR, (ev, d) => { if (d && d.fatal) fail(); });
+    hlsInst.loadSource(url); hlsInst.attachMedia(v);
+  } else if (v.canPlayType('application/vnd.apple.mpegurl')) { v.onerror = fail; v.src = url; }
+  else { msg.textContent = '이 브라우저에서는 영상을 재생할 수 없어요.'; return; }
+  v.play().catch(() => {});
+}
+$('#cctvX').addEventListener('click', closeCctv);
+document.addEventListener('visibilitychange', () => { if (document.hidden && cctvNow) closeCctv(); }); // 화면을 끄면 데이터 절약
+
 buildLayers();
 
 let pinMarker = null, meMarker = null, meCircle = null, zoneGeo = L.layerGroup().addTo(map);
