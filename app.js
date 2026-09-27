@@ -650,7 +650,7 @@ function weatherHtml(w) {
 }
 
 /* ───────── 지도 ───────── */
-const map = L.map('map', { zoomControl: false, attributionControl: false, zoomSnap: 0.5 }).setView(CFG.DEFAULT_CENTER, CFG.DEFAULT_ZOOM);
+const map = L.map('map', { zoomControl: false, attributionControl: false }).setView(CFG.DEFAULT_CENTER, CFG.DEFAULT_ZOOM);
 const zoomCtl = L.control.zoom({ position: 'topright' }); // 오른쪽 레이어 버튼 아래
 let baseLayers = {}, overlayLayers = {}, layerCtl;
 
@@ -1221,9 +1221,10 @@ function updateHud(c, t) {
   }
   if (spd === undefined) { renderHeading(); setAcc(c.accuracy); return; }
   prevFix = { lat: c.latitude, lon: c.longitude, t };
-  if (spd != null && !isNaN(spd)) trackKmh = spd * 3.6;
+  if (spd != null && !isNaN(spd)) { kmhHist.push(spd * 3.6); if (kmhHist.length > 3) kmhHist.shift(); trackKmh = kmhHist.reduce((a, b) => a + b, 0) / kmhHist.length; } // 튀는 값 완화
   gpsHeading = spd != null && spd > 1 && c.heading != null && !isNaN(c.heading) ? c.heading : null; // 걷는 속도 이상일 때만 진행 방향 사용
   $('#hudSpd').textContent = spd == null || isNaN(spd) ? '-' : `${(spd * 3.6).toFixed(spd * 3.6 < 10 ? 1 : 0)} km/h`;
+  setSpdQuality();
   gpsAlt = c.altitude == null || isNaN(c.altitude) ? null : c.altitude;
   lastPos = [c.latitude, c.longitude];
   renderAlt();
@@ -1331,6 +1332,30 @@ function renderHudExtra() {
   else if (z.near) hudRow('hudZone', `${esc(shortZone(z.near.zone))} ${fmtDist(z.near.d)}`, z.near.d < 1000 ? 'q-mid' : '');
   else hudRow('hudZone', `${fmtDist(z.reach)} 안에 없음`, 'q-good');
 }
+/* 속도 신뢰도(안드로이드 앱): 폰이 알려 주는 속도 오차로 색 표시 — ±2km/h 이하 초록 · ±5km/h 이하 주황 · 그 이상 빨강 */
+let spdAccMs = null, spdAccAt = 0;
+function setSpdQuality() {
+  const el = $('#hudSpd'); if (!el) return;
+  if (el.classList.contains('stale')) return;
+  const fresh = spdAccMs != null && Date.now() - spdAccAt < 5000;
+  el.className = !fresh ? '' : spdAccMs * 3.6 <= 2 ? 'q-good' : spdAccMs * 3.6 <= 5 ? 'q-mid' : 'q-bad';
+  el.title = fresh ? `속도 오차 ±${(spdAccMs * 3.6).toFixed(1)} km/h` : '';
+}
+/* GPS 끊김(터널·지하차도): 5초 넘게 새 위치가 없으면 알리고, 마지막 속도·축척·위치를 그대로 유지 */
+let gpsWatch = null;
+function gpsWatchdog(on) {
+  clearInterval(gpsWatch); gpsWatch = null;
+  $('#hudLostRow').classList.add('hidden'); $('#hudSpd').classList.remove('stale');
+  if (!on) return;
+  gpsWatch = setInterval(() => {
+    if (!lastFixAt) return; // 첫 위치를 찾는 중
+    const gap = Math.round((Date.now() - lastFixAt) / 1000), lost = gap >= 5;
+    $('#hudLostRow').classList.toggle('hidden', !lost);
+    $('#hudSpd').classList.toggle('stale', lost);
+    if (lost) $('#hudLost').textContent = gap < 60 ? `${gap}초` : `${Math.floor(gap / 60)}분 ${gap % 60}초`;
+    else setSpdQuality();
+  }, 1000);
+}
 // GPS 오차 색: 10m 이하 초록 · 30m 이하 주황 · 그 이상 빨강
 function setAcc(a) {
   const el = $('#hudAcc');
@@ -1349,6 +1374,7 @@ function satPoll(on) {
   if (!on) return;
   const tick = () => {
     let g = null; try { g = JSON.parse(window.NFZApp.gnss()); } catch (e) {}
+    if (g && g.spdAcc != null && isFinite(g.spdAcc)) { spdAccMs = +g.spdAcc; spdAccAt = Date.now(); setSpdQuality(); }
     const nb = g && g.hpa > 300 ? +g.hpa : null, ng = g && g.geoid != null && isFinite(g.geoid) && Math.abs(g.geoid) < 120 ? +g.geoid : null;
     baroHpa = nb; geoidN = ng; renderAlt(); // 기압은 앱에서 약 2초 평균한 값
     const el = $('#hudSat');
@@ -1400,19 +1426,20 @@ function followTo(latlng, dur, zWant) {
   if (z !== map.getZoom()) { appZoomUntil = Date.now() + 1500; map.setView(c, z, { animate: true }); } // 축척이 바뀔 땐 확대·축소 애니메이션
   else map.panTo(c, { animate: true, duration: dur, easeLinearity: 1, noMoveStart: true });
 }
-/* 속도에 맞춘 자동 축척 (내비처럼): 느리면 크게, 빠르면 넓게.
-   빨라질 땐 1.5초, 느려질 땐 4초 이어지면 바꿈(신호 대기마다 들락날락하지 않게). 손으로 확대·축소하면 30초 동안 멈춤 */
-const AUTO_ZOOM = [[5, 18], [12, 17.5], [20, 17], [30, 16.5], [45, 16], [60, 15.5], [80, 15], [100, 14.5], [Infinity, 14]]; // [이 속도(km/h) 미만, 줌]
-let trackKmh = null, autoZ = null, zCand = null, zCandAt = 0, manualZoomAt = 0, appZoomUntil = 0;
+/* 속도에 맞춘 자동 축척 (내비처럼): 느리면 크게, 빠르면 넓게. 지도 그림이 선명하도록 정수 단계만 사용.
+   화면 깜빡임 방지: 최근 3번 속도의 평균으로 판단 · 빨라질 땐 2초, 느려질 땐 5초 이어져야 바꿈 · 한 번 바꾸면 8초는 유지 ·
+   경계보다 15% 이상 느려져야 확대. 손으로 확대·축소하면 30초 동안 멈춤 */
+const AUTO_ZOOM = [[7, 18], [25, 17], [50, 16], [90, 15], [Infinity, 14]]; // [이 속도(km/h) 미만, 줌]
+let trackKmh = null, autoZ = null, zCand = null, zCandAt = 0, zChangedAt = 0, manualZoomAt = 0, appZoomUntil = 0, kmhHist = [];
 function bandZoom(kmh) { for (const [lim, z] of AUTO_ZOOM) if (kmh < lim) return z; }
 function autoZoomTarget() {
   if (trackKmh == null || Date.now() - manualZoomAt < 30000) return null; // null = 지금 축척 유지
   let want = bandZoom(trackKmh);
   if (autoZ == null) return (autoZ = want);
-  if (want > autoZ && bandZoom(trackKmh * 1.1) <= autoZ) want = autoZ; // 경계보다 10% 이상 느려져야 확대(경계에서 들락날락 방지)
+  if (want > autoZ && bandZoom(trackKmh * 1.15) <= autoZ) want = autoZ; // 경계보다 15% 이상 느려져야 확대
   if (want === autoZ) { zCand = null; return autoZ; }
   if (zCand !== want) { zCand = want; zCandAt = Date.now(); }
-  if (Date.now() - zCandAt >= (want < autoZ ? 1500 : 4000)) { autoZ = want; zCand = null; }
+  if (Date.now() - zCandAt >= (want < autoZ ? 2000 : 5000) && Date.now() - zChangedAt >= 8000) { autoZ = want; zCand = null; zChangedAt = Date.now(); }
   return autoZ;
 }
 map.on('zoomstart', () => {
@@ -1462,10 +1489,11 @@ function startTrack() {
   keepAwake(true);
   compass(true); // 버튼을 누른 순간에 켜야 아이폰에서 권한을 물을 수 있음
   gpsHeading = null; prevFix = null; lastFixAt = 0;
-  trackKmh = null; autoZ = null; zCand = null; manualZoomAt = 0; lastPos = null; hudWxTry = Date.now() - 50e3;
+  trackKmh = null; autoZ = null; zCand = null; manualZoomAt = 0; kmhHist = []; zChangedAt = 0; lastPos = null; hudWxTry = Date.now() - 50e3;
   ['hudSun', 'hudWind', 'hudWindUp', 'hudTemp', 'hudZone'].forEach(id => $('#' + id + 'Row').classList.add('hidden'));
   $('#navHud').classList.remove('hidden');
   satPoll(true);
+  gpsWatchdog(true);
   trackUI();
   toast('실시간 위치 추적을 켰어요. 움직이면 판정이 바로 바뀌고, 더 엄격한 구역에 들어가면 진동으로 알려줘요.', 4000);
 }
@@ -1474,6 +1502,7 @@ function stopTrack(quiet) {
   trackId = null; keepAwake(false); compass(false); gpsHeading = null;
   $('#navHud').classList.add('hidden');
   satPoll(false);
+  gpsWatchdog(false);
   if (meAnim) { cancelAnimationFrame(meAnim); meAnim = null; }
   if (headingMarker) { map.removeLayer(headingMarker); headingMarker = null; }
   trackUI();
