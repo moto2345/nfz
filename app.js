@@ -696,11 +696,12 @@ map.on('overlayremove', e => onOverlayToggle(e, false));
 
 /* ───────── 교통 CCTV (국가교통정보센터 ITS · 고속도로·국도) ─────────
    ITS 조회는 한 달 100건 한도라 아껴 씀:
-   · CCTV 위치 목록은 GitHub 자동 작업이 일주일에 한 번 받아 cctv.json으로 저장 → 지도에 표시할 땐 조회 0건
+   · CCTV 위치 목록(전국 약 1만 1천 개)은 cctv.json으로 저장소에 올려 둠 → 지도에 표시할 땐 조회 0건
+     (ITS 서버가 해외(GitHub 자동 작업) 접속을 막아서, 목록 파일은 [안내] 탭 관리자 메뉴에서 국내 폰·PC로 만들어 올림)
    · 영상을 '재생' 누를 때만 그 CCTV 하나의 영상 주소를 1건 조회 (받은 주소는 90분간 재사용)
    · 남은 횟수 = 한도 − 자동 작업 사용 − 이 기기 사용 (다른 사람이 쓴 건 알 수 없어 '추정') */
 const CCTV_URL = 'https://raw.githubusercontent.com/moto2345/nfz-android/main/cctv.json';
-const CCTV_MINZOOM = 11, CCTV_URL_TTL = 90 * 60e3;
+const CCTV_MINZOOM = 12, CCTV_URL_TTL = 90 * 60e3, CCTV_MAX_MARKERS = 400;
 const cctvLayer = L.layerGroup();
 let cctvOn = false, cctvTimer = null, cctvHintAt = 0, cctvList = null, cctvLoading = null;
 function addCctvOverlay() {
@@ -711,15 +712,20 @@ function addCctvOverlay() {
 map.on('overlayadd', e => { if (e.layer !== cctvLayer) return; cctvOn = true; const s = LS.get('layerOn', {}); s.CCTV = true; LS.set('layerOn', s); cctvRefresh(true); });
 map.on('overlayremove', e => { if (e.layer !== cctvLayer) return; cctvOn = false; const s = LS.get('layerOn', {}); s.CCTV = false; LS.set('layerOn', s); cctvLayer.clearLayers(); closeCctv(); });
 map.on('moveend', () => { if (cctvOn) { clearTimeout(cctvTimer); cctvTimer = setTimeout(cctvRefresh, 250); } });
+// 파일 형식: rows = [[이름, 위도, 경도, 0(고속도로)|1(국도)], …] (예전 items 형식도 읽음)
+function cctvNorm(j) {
+  const items = Array.isArray(j.rows) ? j.rows.map(r => ({ n: r[0], lat: r[1], lon: r[2], t: r[3] === 0 ? 'ex' : 'its' })) : j.items;
+  return { items, apiUse: j.apiUse, updatedAtUTC: j.updatedAtUTC, at: Date.now() };
+}
 function loadCctvList() {
   if (cctvList && Date.now() - cctvList.at < 6 * 3600e3) return Promise.resolve(cctvList);
   if (cctvLoading) return cctvLoading;
   cctvLoading = fetchT(CCTV_URL + '?t=' + Math.floor(Date.now() / 3600e3), {}, 15000).then(r => r.ok ? r.json() : null).then(j => {
-    if (!j || !Array.isArray(j.items)) throw new Error('목록 없음');
-    j.at = Date.now(); cctvList = j;
-    try { localStorage.setItem('cctvList', JSON.stringify(j)); } catch (e) {}
-    return j;
-  }).catch(() => { const c = LS.get('cctvList', null); if (c && Array.isArray(c.items)) { cctvList = c; return c; } return null; })
+    if (!j || !(Array.isArray(j.rows) || Array.isArray(j.items))) throw new Error('목록 없음');
+    try { localStorage.setItem('cctvList', JSON.stringify(j)); } catch (e) {} // 용량이 넘치면 이번 실행 동안만
+    cctvList = cctvNorm(j);
+    return cctvList;
+  }).catch(() => { const c = LS.get('cctvList', null); if (c && (c.rows || c.items)) { cctvList = cctvNorm(c); return cctvList; } return null; })
     .finally(() => { cctvLoading = null; });
   return cctvLoading;
 }
@@ -735,8 +741,10 @@ async function cctvRefresh(fromToggle) {
   if (!cctvOn) return;
   if (!list) { toast('교통 CCTV 목록을 불러오지 못했어요.'); return; }
   const bd = map.getBounds().pad(0.15);
+  const inView = list.items.filter(c => bd.contains([c.lat, c.lon]));
   cctvLayer.clearLayers();
-  for (const c of list.items) if (bd.contains([c.lat, c.lon]))
+  if (inView.length > CCTV_MAX_MARKERS) { if (Date.now() - cctvHintAt > 30e3) { cctvHintAt = Date.now(); toast(`이 범위에 CCTV가 ${inView.length}개라 너무 많아요. 조금 더 확대해 주세요.`); } return; }
+  for (const c of inView)
     L.marker([c.lat, c.lon], { icon: cctvIcon, title: c.n, keyboard: false }).on('click', () => openCctv(c)).addTo(cctvLayer);
 }
 // 이번 달 사용량(추정)
@@ -816,6 +824,37 @@ async function playCctv(c) {
   v.play().catch(() => {});
 }
 $('#cctvX').addEventListener('click', closeCctv);
+// [안내] 탭 관리자 메뉴: 전국 CCTV 위치 목록 파일(cctv.json) 만들기 — 조회 2건 사용. 국내 인터넷(폰·PC)에서만 됨
+async function makeCctvFile() {
+  const st = $('#cctvMakeNote');
+  if (!confirm('전국 교통 CCTV 목록 파일을 만들까요?\nITS 조회 2건(고속도로 1 + 국도 1)을 사용해요.\n만든 cctv.json은 nfz-android 저장소 맨 위에 올리면 돼요.')) return;
+  st.textContent = '받는 중… (몇 초 걸려요)';
+  try {
+    await loadCctvList();
+    const month = monthKST(), prev = cctvList && cctvList.apiUse;
+    const rows = [], seen = new Set();
+    for (const [t, code] of [['ex', 0], ['its', 1]]) {
+      const r = await fetchT('https://openapi.its.go.kr:9443/cctvInfo?' + new URLSearchParams({ apiKey: CFG.ITS_KEY, type: t, cctvType: '4', getType: 'json', minX: '124.0', maxX: '132.0', minY: '33.0', maxY: '39.0' }), {}, 60000);
+      const j = r.ok ? await r.json() : null;
+      const d = j && j.response && Array.isArray(j.response.data) ? j.response.data : null;
+      if (!d || !d.length) throw new Error((t === 'ex' ? '고속도로' : '국도') + ' 목록을 받지 못했어요');
+      for (const x of d) {
+        const lat = +(+x.coordy).toFixed(5), lon = +(+x.coordx).toFixed(5), n = String(x.cctvname || 'CCTV').trim();
+        if (!(lat >= 33 && lat <= 39 && lon >= 124 && lon <= 132)) continue;
+        const k = n + '|' + lat + '|' + lon; if (seen.has(k)) continue; seen.add(k);
+        rows.push([n, lat, lon, code]);
+      }
+    }
+    const used = (prev && prev.month === month ? prev.n : 0) + itsDeviceUse() + 2;
+    const file = { updatedAtUTC: new Date().toISOString().replace(/\.\d+Z$/, 'Z'), source: '국가교통정보센터(ITS)', apiUse: { month, n: used, limit: (prev && prev.limit) || 100 }, fields: ['n', 'lat', 'lon', 't(0=고속도로,1=국도)'], rows };
+    LS.set('itsUse', { m: month, n: 0 }); // 이 기기 사용분은 파일에 합쳐 넣었으니 0으로
+    const text = JSON.stringify(file);
+    if (inApp) { try { window.NFZApp.saveFile('cctv.json', text, 'application/json'); } catch (e) {} }
+    else { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' })); a.download = 'cctv.json'; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); }
+    st.textContent = `✅ ${rows.length}개 저장 (이번 달 사용 ${used}/${file.apiUse.limit}). 다운로드 폴더의 cctv.json을 nfz-android 저장소에 올려 주세요.`;
+  } catch (e) { st.textContent = '❌ ' + e.message + ' (해외 인터넷·VPN에서는 안 돼요)'; }
+}
+$('#btnCctvMake').addEventListener('click', makeCctvFile);
 document.addEventListener('visibilitychange', () => { if (document.hidden && cctvNow) closeCctv(); }); // 화면을 끄면 데이터 절약
 
 buildLayers();

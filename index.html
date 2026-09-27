@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="하코 NFZ">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-  <link rel="stylesheet" href="style.css?v=55">
+  <link rel="stylesheet" href="style.css?v=56">
 </head>
 <body>
 
@@ -20,7 +20,7 @@
 <header class="appbar">
   <img src="icons/icon-192.png" alt="" class="appbar-logo">
   <h1>하코 NFZ 조회</h1>
-  <span class="badge">v1.55</span>
+  <span class="badge">v1.56</span>
   <button id="btnWx" class="wx-btn" type="button" aria-label="현재 날씨" title="현재 날씨"><span class="wxb-ico">🌤</span><span class="wxb-txt">현재날씨</span></button>
   <button id="btnNotam" class="appbar-btn notam hidden" type="button" aria-label="항공고시보" title="드론 관련 항공고시보">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M10 20.5a2.2 2.2 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
@@ -234,6 +234,13 @@
     <div class="row-btns"><button id="btnCompassHelp2" class="btn" type="button">보정 방법 보기</button></div>
   </div>
 
+  <details class="card">
+    <summary><b>🛠 관리자: 교통 CCTV 목록 갱신</b></summary>
+    <p class="small">CCTV 위치가 바뀌었을 때(한두 달에 한 번이면 충분) 전국 목록 파일을 새로 만들어요. ITS 조회 <b>2건</b>을 사용하고, 국내 인터넷(폰·PC)에서만 돼요. 만든 <code>cctv.json</code>을 nfz-android 저장소 맨 위에 덮어 올리면 모두에게 반영돼요.</p>
+    <div class="row-btns"><button id="btnCctvMake" class="btn" type="button">📹 CCTV 목록 파일 만들기</button></div>
+    <p id="cctvMakeNote" class="muted small"></p>
+  </details>
+
   <details class="card" id="diagCard">
     <summary>🔧 연결 점검 (자료가 안 불러와질 때)</summary>
     <p class="small">인증키와 지도·공역·주소·날씨·항공고시보 서버에 실제로 연결해 보고 결과를 보여줘요. 보통 30초, 서버가 느리면 1~2분 걸려요. 결과가 이상하면 [결과 복사]로 보내 주세요.</p>
@@ -342,7 +349,7 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="config.js?v=55"></script>
-<script src="app.js?v=55"></script>
+<script src="config.js?v=56"></script>
+<script src="app.js?v=56"></script>
 </body>
 </html>
