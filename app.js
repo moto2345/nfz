@@ -2296,6 +2296,7 @@ $('#btnDiagCopy').addEventListener('click', async () => {
 /* ───────── 앱 정보 창 (상단 버전 배지를 누르면) ─────────
    버전·업데이트 확인 / 데이터 상태 / 최근 바뀐 점 / 강제 새로고침·상태 복사·앱 설치·자세히 진단 */
 const CHANGELOG = [
+  ['v1.65', '앱: 뒤로가기로 열린 창 닫기 · 두 번 눌러야 종료'],
   ['v1.64', '버전을 누르면 앱 정보(업데이트 확인·데이터 상태·바뀐 점)'],
   ['v1.63', '주간 날씨 7일 + 날마다 비행 적합도(○△✕)'],
   ['v1.62', '터널 등 GPS 끊김 표시 · 앱에서 속도 정확도 색 표시'],
@@ -2370,6 +2371,15 @@ $('#btnVerDiag').addEventListener('click', () => {
   closeVer(); switchTab('tab-info');
   const c = $('#diagCard'); if (c) { c.open = true; setTimeout(() => c.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100); }
 });
+
+/* 안드로이드 뒤로가기: 열린 창 닫기 → 지도 탭으로 → (그래도 없으면 앱이 '한 번 더 누르면 종료' 처리) */
+window.nfzBack = () => {
+  const open = $$('.modal:not(.hidden)');
+  if (open.length) { open[open.length - 1].classList.add('hidden'); return true; }
+  const kc = $('#kpCard'); if (kc && !kc.classList.contains('hidden')) { kc.classList.add('hidden'); return true; }
+  const act = $('.tab.active'); if (act && act.id !== 'tab-map') { switchTab('tab-map'); return true; }
+  return false;
+};
 
 /* ───────── 앱에서 실행 중이면 앱 설치 안내 숨김 ───────── */
 if (window.NFZApp) {
