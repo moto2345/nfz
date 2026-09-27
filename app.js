@@ -2293,6 +2293,84 @@ $('#btnDiagCopy').addEventListener('click', async () => {
   catch (e) { if (window.NFZApp && window.NFZApp.share) window.NFZApp.share(text); else prompt('아래 내용을 복사하세요', text); }
 });
 
+/* ───────── 앱 정보 창 (상단 버전 배지를 누르면) ─────────
+   버전·업데이트 확인 / 데이터 상태 / 최근 바뀐 점 / 강제 새로고침·상태 복사·앱 설치·자세히 진단 */
+const CHANGELOG = [
+  ['v1.64', '버전을 누르면 앱 정보(업데이트 확인·데이터 상태·바뀐 점)'],
+  ['v1.63', '주간 날씨 7일 + 날마다 비행 적합도(○△✕)'],
+  ['v1.62', '터널 등 GPS 끊김 표시 · 앱에서 속도 정확도 색 표시'],
+  ['v1.61', '속도별 자동 축척 5단계 · 화면 깜빡임 줄임'],
+  ['v1.58', 'DJI 새 기종(Lito·Neo 2·Avata 360) · 기체별 추위 경고 · 조종자 자격 안내 · 비행 타이머 복귀 알림']
+];
+const WEB_VER = ($('#btnVer') && $('#btnVer').textContent.trim()) || '';
+let verStatusText = '';
+function agoText(ms) { const m = Math.round(ms / 60000); return m < 1 ? '방금' : m < 60 ? `${m}분 전` : m < 1440 ? `${Math.round(m / 60)}시간 전` : `${Math.round(m / 1440)}일 전`; }
+async function openVer() {
+  $('#verModal').classList.remove('hidden'); $('#verModal .modal-box').scrollTop = 0;
+  $('#btnVerApk').classList.toggle('hidden', !!window.NFZApp);
+  const appVer = window.NFZApp && window.NFZApp.version ? (() => { try { return window.NFZApp.version(); } catch (e) { return ''; } })() : '';
+  const row = (ico, name, val, lv) => `<div class="ver-row"><span>${ico} ${name}</span><b class="${lv === 'ok' ? 'q-good' : lv === 'mid' ? 'q-mid' : lv === 'bad' ? 'q-bad' : ''}">${val}</b></div>`;
+  const render = (latest, geo) => {
+    const lines = [];
+    // ① 버전
+    let upd;
+    if (latest === undefined) upd = ['확인 중…', ''];
+    else if (!latest) upd = ['확인 못 함 (오프라인?)', 'mid'];
+    else if (latest === WEB_VER) upd = ['최신 버전이에요 ✅', 'ok'];
+    else upd = [`새 버전 ${latest} 있어요 → 강제 새로고침`, 'bad'];
+    let h = `<div class="ver-sec">버전</div>` + row('🌐', '웹', WEB_VER, '') + (appVer ? row('📱', '앱(APK)', esc(appVer), '') : '') + row('🔔', '업데이트', upd[0], upd[1]);
+    lines.push(`하코 NFZ 조회 웹 ${WEB_VER}${appVer ? ' / 앱 ' + appVer : ''} · 업데이트: ${upd[0]}`);
+    // ② 데이터 상태
+    const d = [];
+    if (!lastResult) d.push(['🗺', '공역 자료(브이월드)', '아직 조회 전', '']);
+    else if (lastResult.verdict.code === 'error') d.push(['🗺', '공역 자료(브이월드)', '불러오지 못함', 'bad']);
+    else if (lastResult.failed.length) d.push(['🗺', '공역 자료(브이월드)', `일부 실패 (${lastResult.failed.map(f => f.zone.name).join(', ')})`, 'mid']);
+    else d.push(['🗺', '공역 자료(브이월드)', '정상', 'ok']);
+    if (!notamData) d.push(['📢', '항공고시보', '불러오지 못함', 'bad']);
+    else { const age = notamData.fetchedAtUTC ? Date.now() - Date.parse(notamData.fetchedAtUTC) : null; d.push(['📢', '항공고시보', age == null ? '받음' : `${agoText(age)} 갱신`, age != null && age > 8 * 3600e3 ? 'mid' : 'ok']); }
+    d.push(['📞', '담당 연락처', CONTACTS ? `기준 ${esc(CONTACTS.updated)}` : '불러오지 못함', CONTACTS ? 'ok' : 'mid']);
+    d.push(['🧲', '지자기 Kp', kpShown ? `Kp ${kpShown.now}${kpCache ? ' · ' + agoText(Date.now() - kpCache.t) : ''}` : '받지 못함', kpShown ? 'ok' : 'mid']);
+    d.push(['🌤', '날씨', lastResult && lastResult.wx ? `받음 · ${agoText(Date.now() - (lastResult.wxAt || Date.now()))}` : lastResult ? '받지 못함' : '아직 조회 전', lastResult && lastResult.wx ? 'ok' : lastResult ? 'mid' : '']);
+    const acc = lastResult && lastResult.label === '내 위치' && lastResult.acc ? ` · 오차 ±${Math.round(lastResult.acc)}m` : '';
+    d.push(['📍', '위치 권한', geo === 'granted' ? '허용됨' + acc : geo === 'denied' ? '거부됨 (설정에서 허용 필요)' : geo === 'prompt' ? '아직 묻지 않음' : '확인 불가' + acc, geo === 'granted' ? 'ok' : geo === 'denied' ? 'bad' : '']);
+    h += `<div class="ver-sec">데이터 상태</div>` + d.map(x => row(...x)).join('');
+    lines.push(...d.map(x => `${x[1]}: ${x[2].replace(/<[^>]+>/g, '')}`));
+    // ③ 바뀐 점
+    h += `<div class="ver-sec">최근 바뀐 점</div><ul class="ver-log">${CHANGELOG.map(([v, t]) => `<li><b>${v}</b> ${esc(t)}</li>`).join('')}</ul>`;
+    const ua = navigator.userAgent;
+    lines.push('기기: ' + (/SamsungBrowser/i.test(ua) ? '삼성 인터넷' : window.NFZApp ? '안드로이드 앱' : /Chrome/i.test(ua) ? '크롬' : /Safari/i.test(ua) ? '사파리' : '기타') + ' · ' + new Date().toLocaleString('ko-KR'));
+    verStatusText = lines.join('\n');
+    $('#verBody').innerHTML = h;
+  };
+  render(undefined, null);
+  const [latest, geo] = await Promise.all([
+    fetchT('index.html?_=' + Date.now(), { cache: 'no-store' }, 8000).then(r => r.ok ? r.text() : null).then(t => { const m = t && t.match(/id="btnVer"[^>]*>\s*(v[\d.]+)\s*</); return m ? m[1] : null; }).catch(() => null),
+    navigator.permissions && navigator.permissions.query ? navigator.permissions.query({ name: 'geolocation' }).then(p => p.state).catch(() => null) : Promise.resolve(null)
+  ]);
+  if (!$('#verModal').classList.contains('hidden')) render(latest, geo);
+}
+const closeVer = () => $('#verModal').classList.add('hidden');
+$('#btnVer').addEventListener('click', openVer);
+$('#btnVerX').addEventListener('click', closeVer);
+$('#btnVerClose').addEventListener('click', closeVer);
+$('#verModal').addEventListener('click', e => { if (e.target.id === 'verModal') closeVer(); });
+// 강제 새로고침: 저장해 둔 화면(서비스워커·캐시)을 지우고 최신으로 다시 받기 (비행 기록·즐겨찾기는 그대로)
+$('#btnHardReload').addEventListener('click', async () => {
+  toast('최신 버전을 받는 중…');
+  try { if (navigator.serviceWorker) for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister(); } catch (e) {}
+  try { if (window.caches) for (const k of await caches.keys()) await caches.delete(k); } catch (e) {}
+  location.replace(location.pathname + '?r=' + Date.now());
+});
+$('#btnCopyStatus').addEventListener('click', async () => {
+  const t = verStatusText || '';
+  try { await navigator.clipboard.writeText(t); toast('상태를 복사했어요. 카톡 등에 붙여넣기 하세요.'); }
+  catch (e) { if (window.NFZApp && window.NFZApp.share) window.NFZApp.share(t); else prompt('아래 내용을 복사하세요', t); }
+});
+$('#btnVerDiag').addEventListener('click', () => {
+  closeVer(); switchTab('tab-info');
+  const c = $('#diagCard'); if (c) { c.open = true; setTimeout(() => c.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100); }
+});
+
 /* ───────── 앱에서 실행 중이면 앱 설치 안내 숨김 ───────── */
 if (window.NFZApp) {
   const dl = $('#androidApp'); if (dl) dl.classList.add('hidden');

@@ -30,6 +30,15 @@ a{color:var(--primary)}
 .wxm-x{border:0;background:none;font-size:18px;color:var(--muted);padding:4px 6px;cursor:pointer}
 .wxm-where{margin:0 0 4px;font-size:12px;color:var(--muted);word-break:keep-all}
 .wx-modal .section-title{margin-top:6px}
+button.badge{color:#fff;font-family:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}
+button.badge:active{background:rgba(255,255,255,.35)}
+.ver-sec{font-size:11px;font-weight:800;color:var(--muted);margin:12px 0 4px}
+.ver-row{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-top:1px solid var(--line);font-size:12.5px}
+.ver-row b{text-align:right;word-break:keep-all}
+.ver-row b.q-good{color:var(--green)} .ver-row b.q-mid{color:#e65100} .ver-row b.q-bad{color:var(--red)}
+.ver-log{margin:0;padding-left:16px;font-size:12px;line-height:1.6}
+.ver-log b{color:var(--primary)}
+.ver-btns{flex-wrap:wrap;margin-top:12px}
 .appbar .badge{font-size:11px;font-weight:700;padding:2px 6px;border-radius:16px;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.45);white-space:nowrap}
 .tab{position:fixed;inset:var(--appbar-h) 0 calc(var(--tabbar-h) + var(--safe-b)) 0;display:none}
 .tab.active{display:block}
