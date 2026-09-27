@@ -2296,6 +2296,8 @@ $('#btnDiagCopy').addEventListener('click', async () => {
 /* ───────── 앱 정보 창 (상단 버전 배지를 누르면) ─────────
    버전·업데이트 확인 / 데이터 상태 / 최근 바뀐 점 / 강제 새로고침·상태 복사·앱 설치·자세히 진단 */
 const CHANGELOG = [
+  ['v1.67', '앱 정보의 위치 권한을 앱 권한·GPS 켜짐까지 정확하게 확인'],
+  ['v1.66', '앱 정보에서 설치된 앱(APK)도 최신인지 확인'],
   ['v1.65', '앱: 뒤로가기로 열린 창 닫기 · 두 번 눌러야 종료'],
   ['v1.64', '버전을 누르면 앱 정보(업데이트 확인·데이터 상태·바뀐 점)'],
   ['v1.63', '주간 날씨 7일 + 날마다 비행 적합도(○△✕)'],
@@ -2305,13 +2307,14 @@ const CHANGELOG = [
 ];
 const WEB_VER = ($('#btnVer') && $('#btnVer').textContent.trim()) || '';
 let verStatusText = '';
+// '1.0.22' 같은 버전 비교 (a가 새것이면 양수)
+function verCmp(a, b) { const x = String(a).split('.').map(Number), y = String(b).replace(/^v/i, '').split('.').map(Number); for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (x[i] || 0) - (y[i] || 0); if (d) return d; } return 0; }
 function agoText(ms) { const m = Math.round(ms / 60000); return m < 1 ? '방금' : m < 60 ? `${m}분 전` : m < 1440 ? `${Math.round(m / 60)}시간 전` : `${Math.round(m / 1440)}일 전`; }
 async function openVer() {
   $('#verModal').classList.remove('hidden'); $('#verModal .modal-box').scrollTop = 0;
-  $('#btnVerApk').classList.toggle('hidden', !!window.NFZApp);
   const appVer = window.NFZApp && window.NFZApp.version ? (() => { try { return window.NFZApp.version(); } catch (e) { return ''; } })() : '';
   const row = (ico, name, val, lv) => `<div class="ver-row"><span>${ico} ${name}</span><b class="${lv === 'ok' ? 'q-good' : lv === 'mid' ? 'q-mid' : lv === 'bad' ? 'q-bad' : ''}">${val}</b></div>`;
-  const render = (latest, geo) => {
+  const render = (latest, geo, apkLatest) => {
     const lines = [];
     // ① 버전
     let upd;
@@ -2319,8 +2322,16 @@ async function openVer() {
     else if (!latest) upd = ['확인 못 함 (오프라인?)', 'mid'];
     else if (latest === WEB_VER) upd = ['최신 버전이에요 ✅', 'ok'];
     else upd = [`새 버전 ${latest} 있어요 → 강제 새로고침`, 'bad'];
-    let h = `<div class="ver-sec">버전</div>` + row('🌐', '웹', WEB_VER, '') + (appVer ? row('📱', '앱(APK)', esc(appVer), '') : '') + row('🔔', '업데이트', upd[0], upd[1]);
-    lines.push(`하코 NFZ 조회 웹 ${WEB_VER}${appVer ? ' / 앱 ' + appVer : ''} · 업데이트: ${upd[0]}`);
+    // 앱(APK): GitHub 다운로드 페이지(Release)의 최신 버전과 비교
+    let apk = null, apkNew = false;
+    if (apkLatest === undefined) apk = ['확인 중…', ''];
+    else if (!apkLatest) apk = ['확인 못 함', 'mid'];
+    else if (appVer) { apkNew = verCmp(apkLatest, appVer) > 0; apk = apkNew ? [`새 앱 v${apkLatest} 있어요 → 📱 앱 설치`, 'bad'] : ['최신 앱이에요 ✅', 'ok']; }
+    else apk = [`v${apkLatest}`, ''];
+    $('#btnVerApk').classList.toggle('hidden', !!window.NFZApp && !apkNew);
+    let h = `<div class="ver-sec">버전</div>` + row('🌐', '웹 화면', WEB_VER, '') + row('🔔', '웹 업데이트', upd[0], upd[1])
+      + (appVer ? row('📱', '설치된 앱', 'v' + esc(appVer), '') + row('🔔', '앱 업데이트', apk[0], apk[1]) : row('📱', '안드로이드 앱 최신', apk[0], apk[1]));
+    lines.push(`하코 NFZ 조회 웹 ${WEB_VER} · 웹 업데이트: ${upd[0]}`, appVer ? `설치된 앱 v${appVer} · 앱 업데이트: ${apk[0]}` : `안드로이드 앱 최신: ${apk[0]}`);
     // ② 데이터 상태
     const d = [];
     if (!lastResult) d.push(['🗺', '공역 자료(브이월드)', '아직 조회 전', '']);
@@ -2333,7 +2344,18 @@ async function openVer() {
     d.push(['🧲', '지자기 Kp', kpShown ? `Kp ${kpShown.now}${kpCache ? ' · ' + agoText(Date.now() - kpCache.t) : ''}` : '받지 못함', kpShown ? 'ok' : 'mid']);
     d.push(['🌤', '날씨', lastResult && lastResult.wx ? `받음 · ${agoText(Date.now() - (lastResult.wxAt || Date.now()))}` : lastResult ? '받지 못함' : '아직 조회 전', lastResult && lastResult.wx ? 'ok' : lastResult ? 'mid' : '']);
     const acc = lastResult && lastResult.label === '내 위치' && lastResult.acc ? ` · 오차 ±${Math.round(lastResult.acc)}m` : '';
-    d.push(['📍', '위치 권한', geo === 'granted' ? '허용됨' + acc : geo === 'denied' ? '거부됨 (설정에서 허용 필요)' : geo === 'prompt' ? '아직 묻지 않음' : '확인 불가' + acc, geo === 'granted' ? 'ok' : geo === 'denied' ? 'bad' : '']);
+    // 위치: 앱이면 안드로이드 권한·위치 서비스를 직접 확인, 웹이면 브라우저 권한 + 이번에 위치를 실제로 받았는지
+    let lp = null; try { lp = window.NFZApp && window.NFZApp.locPerm ? JSON.parse(window.NFZApp.locPerm()) : null; } catch (e) {}
+    const gotFix = !!meMarker;
+    let loc;
+    if (lp) loc = !lp.fine && !lp.coarse ? ['거부됨 (폰 설정 → 앱 → 권한에서 허용)', 'bad']
+      : !lp.gps ? ['허용됨 · 폰 위치(GPS)가 꺼져 있어요', 'bad']
+      : !lp.fine ? ['대략적 위치만 허용 (정확한 위치를 켜 주세요)', 'mid'] : ['허용됨 (정확한 위치)' + acc, 'ok'];
+    else if (geo === 'denied') loc = ['거부됨 (브라우저 설정에서 허용)', 'bad'];
+    else if (geo === 'granted' || gotFix) loc = ['허용됨' + acc, 'ok'];
+    else if (geo === 'prompt') loc = ['아직 확인 전 (⌖ 내 위치를 누르면 확인돼요)', ''];
+    else loc = ['확인 불가', ''];
+    d.push(['📍', '위치 권한', loc[0], loc[1]]);
     h += `<div class="ver-sec">데이터 상태</div>` + d.map(x => row(...x)).join('');
     lines.push(...d.map(x => `${x[1]}: ${x[2].replace(/<[^>]+>/g, '')}`));
     // ③ 바뀐 점
@@ -2343,12 +2365,14 @@ async function openVer() {
     verStatusText = lines.join('\n');
     $('#verBody').innerHTML = h;
   };
-  render(undefined, null);
-  const [latest, geo] = await Promise.all([
+  render(undefined, null, undefined);
+  const [latest, geo, apkLatest] = await Promise.all([
     fetchT('index.html?_=' + Date.now(), { cache: 'no-store' }, 8000).then(r => r.ok ? r.text() : null).then(t => { const m = t && t.match(/id="btnVer"[^>]*>\s*(v[\d.]+)\s*</); return m ? m[1] : null; }).catch(() => null),
-    navigator.permissions && navigator.permissions.query ? navigator.permissions.query({ name: 'geolocation' }).then(p => p.state).catch(() => null) : Promise.resolve(null)
+    navigator.permissions && navigator.permissions.query ? navigator.permissions.query({ name: 'geolocation' }).then(p => p.state).catch(() => null) : Promise.resolve(null),
+    fetchT('https://api.github.com/repos/moto2345/nfz-android/releases/latest', { headers: { Accept: 'application/vnd.github+json' } }, 8000)
+      .then(r => r.ok ? r.json() : null).then(j => j && j.tag_name ? String(j.tag_name).replace(/^v/i, '') : null).catch(() => null)
   ]);
-  if (!$('#verModal').classList.contains('hidden')) render(latest, geo);
+  if (!$('#verModal').classList.contains('hidden')) render(latest, geo, apkLatest);
 }
 const closeVer = () => $('#verModal').classList.add('hidden');
 $('#btnVer').addEventListener('click', openVer);
