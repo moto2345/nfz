@@ -184,6 +184,20 @@ a.btn{text-decoration:none;color:var(--primary)}
 
 .toast{position:fixed;left:50%;bottom:calc(var(--tabbar-h) + var(--safe-b) + 13px);transform:translateX(-50%);background:rgba(20,24,32,.92);color:#fff;
   padding:8px 13px;border-radius:8px;font-size:11px;z-index:3000;max-width:90vw;text-align:center}
+/* 주간 날씨 */
+table.week{width:100%;border-collapse:collapse;font-size:12px;margin:2px 0 4px;font-variant-numeric:tabular-nums}
+table.week th{font-size:10.5px;font-weight:600;color:var(--muted);padding:3px 2px;text-align:center;line-height:1.2}
+table.week td{padding:5px 2px;border-top:1px solid var(--line);text-align:center;white-space:nowrap}
+table.week .wk-day{text-align:left}
+table.week .wk-day b{font-size:12.5px} table.week .wk-day small{margin-left:4px;font-size:10.5px;color:var(--muted)}
+table.week tr.sun .wk-day b{color:var(--red)} table.week tr.sat .wk-day b{color:var(--primary)}
+table.week .wk-ico{font-size:16px}
+table.week .lo{color:#1e88e5} table.week .hi{color:#e53935}
+table.week .wk-rain{font-size:11px}
+table.week .wk-wind.q-mid{color:#e65100;font-weight:700} table.week .wk-wind.q-bad{color:var(--red);font-weight:800}
+.wk-fly{display:inline-block;min-width:52px;padding:2px 6px;border-radius:10px;font-size:11px;font-weight:800}
+.wk-fly.ok{background:rgba(46,125,50,.12);color:var(--green)} .wk-fly.mid{background:rgba(239,108,0,.14);color:#e65100} .wk-fly.bad{background:rgba(229,57,53,.13);color:var(--red)}
+.section-title small{font-weight:500}
 /* 담당 연락처 카드 */
 .contacts{margin:12px 0 4px;border:1px solid var(--line);border-radius:12px;background:var(--card);overflow:hidden}
 .contacts>summary{cursor:pointer;padding:10px 12px;font-size:13px;font-weight:800;list-style:none;display:flex;align-items:center;gap:6px}

@@ -452,7 +452,8 @@ async function fetchWeather(lat, lon) {
     latitude: lat.toFixed(4), longitude: lon.toFixed(4),
     current: 'temperature_2m,precipitation,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl,wind_speed_120m',
     hourly: 'precipitation_probability,precipitation', forecast_hours: '3',
-    daily: 'sunrise,sunset', timezone: 'Asia/Seoul', wind_speed_unit: 'ms', forecast_days: '1'
+    daily: 'sunrise,sunset,weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max',
+    timezone: 'Asia/Seoul', wind_speed_unit: 'ms', forecast_days: '7'
   });
   const [r, kp] = await Promise.all([fetchT(u, {}, 12000), Promise.race([fetchKp(), new Promise(res => setTimeout(() => res(null), 6000))]).catch(() => null)]);
   if (!r.ok) throw new Error('날씨 오류');
@@ -609,6 +610,34 @@ function weatherIssues(w) {
     rainMm: w.hourly && w.hourly.precipitation ? Math.round(w.hourly.precipitation.reduce((a, v) => a + (v || 0), 0) * 10) / 10 : 0
   };
 }
+/* 주간 날씨 (7일) — 날마다 고른 기체 기준으로 비행 적합도 표시
+   부적합: 최대 돌풍 ≥ 기체 한계 · 최대 풍속 ≥ 한계의 75% · 비 확률 60% 이상 · 최저기온 < 기체 작동 온도
+   주의: 돌풍 ≥ 한계의 65% · 풍속 ≥ 한계의 50% · 비 확률 30% 이상 */
+const WX_ICO = c => c === 0 ? '☀️' : c <= 2 ? '🌤' : c === 3 ? '☁️' : c <= 48 ? '🌫' : c <= 57 ? '🌦' : c <= 67 ? '🌧' : c <= 77 ? '🌨' : c <= 82 ? '🌧' : c <= 86 ? '🌨' : '⛈';
+function weekHtml(w) {
+  const d = w.daily; if (!d || !d.time || d.time.length < 2 || !d.temperature_2m_max) return '';
+  const dr = currentDrone(), L = dr.wind, DOW = ['일', '월', '화', '수', '목', '금', '토'];
+  const rows = d.time.map((t, i) => {
+    const dt = new Date(t + 'T12:00:00+09:00'), dow = DOW[dt.getUTCDay()];
+    const name = i === 0 ? '오늘' : i === 1 ? '내일' : dow;
+    const g = d.wind_gusts_10m_max[i], ws = d.wind_speed_10m_max[i], rp = d.precipitation_probability_max ? d.precipitation_probability_max[i] : null;
+    const tmx = d.temperature_2m_max[i], tmn = d.temperature_2m_min[i], code = d.weather_code[i];
+    const cold = dr.tmin != null && tmn < dr.tmin;
+    const bad = g >= L || ws >= L * 0.75 || rp >= 60 || cold || code >= 95;
+    const mid = !bad && (g >= L * 0.65 || ws >= L * 0.5 || rp >= 30 || tmn < 10);
+    const why = bad ? (g >= L || ws >= L * 0.75 ? '강풍' : cold ? '저온' : code >= 95 ? '뇌우' : '비') : mid ? (g >= L * 0.65 || ws >= L * 0.5 ? '바람' : rp >= 30 ? '비' : '추위') : '좋음';
+    return `<tr class="${dow === '일' ? 'sun' : dow === '토' ? 'sat' : ''}">
+      <td class="wk-day"><b>${name}</b><small>${dt.getUTCMonth() + 1}/${dt.getUTCDate()}</small></td>
+      <td class="wk-ico" title="${esc(WX[code] || '')}">${WX_ICO(code)}</td>
+      <td class="wk-t"><span class="lo">${Math.round(tmn)}°</span> / <span class="hi">${Math.round(tmx)}°</span></td>
+      <td class="wk-rain">${rp != null ? '💧' + rp + '%' : '-'}</td>
+      <td class="wk-wind ${g >= L ? 'q-bad' : g >= L * 0.65 ? 'q-mid' : ''}">${g.toFixed(1)}</td>
+      <td><span class="wk-fly ${bad ? 'bad' : mid ? 'mid' : 'ok'}">${bad ? '✕' : mid ? '△' : '○'} ${why}</span></td></tr>`;
+  }).join('');
+  return `<div class="section-title">주간 날씨 · 비행 적합도 <small>(${esc(dr.id === 'std' ? '250g급' : dr.name)} 기준)</small></div>
+    <table class="week"><thead><tr><th>날짜</th><th></th><th>최저/최고</th><th>비</th><th>돌풍<br>m/s</th><th>비행</th></tr></thead><tbody>${rows}</tbody></table>
+    <p class="muted small">○ 좋음 · △ 주의 · ✕ 부적합 — 하루 중 가장 센 바람·가장 높은 비 확률 기준이라, 시간대에 따라 날릴 수 있는 때가 있을 수 있어요.</p>`;
+}
 function weatherHtml(w) {
   const c = w.current;
   const { sunrise, sunset, nowHM, night } = weatherIssues(w);
@@ -641,6 +670,7 @@ function weatherHtml(w) {
       <div><b>${iss.rainProb != null ? iss.rainProb + '%' : c.precipitation}</b><span>${iss.rainProb != null ? '비 올 확률 (3시간)' : '강수 mm'}</span></div>
     </div>
     <div class="wx-note">${notes.join('<br>')}</div>
+    ${weekHtml(w)}
     <p class="muted small">※ 날씨는 예보 모델 값이라 실제와 다를 수 있어요. 비가 오거나 바람이 세면 화면과 상관없이 비행하지 마세요.</p>
     <label class="drone-pick">내 기체
       <select id="dronePick">${DRONES.map(d => `<option value="${d.id}"${d.id === dr.id ? ' selected' : ''}>${esc(d.name)}</option>`).join('')}</select>
