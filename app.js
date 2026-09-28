@@ -1503,6 +1503,21 @@ async function compass(on) {
   } else if (!on && compassOn) { window.removeEventListener(ev, onOrient); compassOn = false; compassHeading = null; }
 }
 
+// 창이 열리는 순간 진행 중인 지도·마커 움직임을 바로 멈추고, 창이 닫히면 현재 위치로 한 번 맞춤
+{
+  let wasOpen = false;
+  const mo = new MutationObserver(() => {
+    const open = anyModalOpen();
+    if (open && !wasOpen) {
+      if (meAnim) { cancelAnimationFrame(meAnim); meAnim = null; }
+      try { map.stop(); } catch (e) {}
+    } else if (!open && wasOpen && trackId != null && trackFollow && lastPos && $('#tab-map').classList.contains('active')) {
+      setViewVisible(lastPos, map.getZoom());
+    }
+    wasOpen = open;
+  });
+  document.querySelectorAll('.modal').forEach(m => mo.observe(m, { attributes: true, attributeFilter: ['class'] }));
+}
 /* 부드러운 이동: 새 위치가 오면 이전 위치에서 새 위치까지 다음 위치가 올 때까지(보통 1초) 미끄러지듯 옮기고, 지도도 같은 속도로 따라감 */
 let meAnim = null, lastFixAt = 0;
 function animateMe(lat, lon, acc, dur) {
@@ -1548,18 +1563,23 @@ map.on('zoomstart', () => {
   if (Date.now() - manualZoomAt > 30000) toast('직접 축척을 바꿔서 자동 축척을 30초 동안 멈춰요', 2500);
   manualZoomAt = Date.now(); autoZ = null; zCand = null; // 다시 켜질 땐 그때 속도에 맞는 축척으로 바로
 });
+// 창(날씨·고시보·앱 정보 등)이 열려 있거나 다른 탭을 보는 중이면 지도 움직임을 멈춤 —
+// 차량용 안드로이드처럼 그래픽이 약한 기기에서 지도가 계속 움직이면 새 창을 못 그려 하얗게 멈추는 문제 방지
+const anyModalOpen = () => !!document.querySelector('.modal:not(.hidden)');
+const mapPaused = () => anyModalOpen() || !$('#tab-map').classList.contains('active');
 function onTrackPos(p) {
   const { latitude: lat, longitude: lon, accuracy } = p.coords;
   const now = Date.now(), gap = lastFixAt ? (now - lastFixAt) / 1000 : 1;
   lastFixAt = now;
+  const paused = mapPaused();
   const dur = Math.max(0.25, Math.min(1.5, gap * 0.95)); // 위치가 오는 간격에 맞춰 이동 시간을 정함
   const jump = meMarker && distM([meMarker.getLatLng().lat, meMarker.getLatLng().lng], [lat, lon]) > 2000; // 순간이동급이면 애니메이션 없이
-  if (jump || !meMarker) showMe(lat, lon, accuracy); else animateMe(lat, lon, accuracy, dur);
+  if (jump || !meMarker || paused) showMe(lat, lon, accuracy); else animateMe(lat, lon, accuracy, dur);
   lastPos = [lat, lon];
   updateHud(p.coords, p.timestamp || now);
-  renderHudExtra();
+  if (!paused) renderHudExtra();
   $('#btnLocate').classList.add('found');
-  if (trackFollow && $('#tab-map').classList.contains('active')) {
+  if (trackFollow && !paused) {
     const zt = autoZoomTarget();
     if (jump) { if (zt != null && zt !== map.getZoom()) appZoomUntil = Date.now() + 1500; setViewVisible([lat, lon], zt != null ? zt : map.getZoom()); }
     else followTo([lat, lon], dur, zt);
@@ -2368,6 +2388,7 @@ $('#btnDiagCopy').addEventListener('click', async () => {
 /* ───────── 앱 정보 창 (상단 버전 배지를 누르면) ─────────
    버전·업데이트 확인 / 데이터 상태 / 최근 바뀐 점 / 강제 새로고침·상태 복사·앱 설치·자세히 진단 */
 const CHANGELOG = [
+  ['v1.70', '실시간 추적 중 창을 열면 지도 움직임을 멈춤 (차량용 기기에서 창이 하얗게 멈추던 문제)'],
   ['v1.69', '앱: 옛 기종에서 실시간 추적 중 계기판·위치 아이콘이 깜빡이던 문제 수정'],
   ['v1.68', '앱: 옛 기종·차량용 기기에서도 내 위치 (기기 GPS에서 직접) · 처음 켤 때 위치 권한 묻기 · 위치 실패 이유 안내'],
   ['v1.67', '앱 정보의 위치 권한을 앱 권한·GPS 켜짐까지 정확하게 확인'],
@@ -2386,6 +2407,7 @@ function verCmp(a, b) { const x = String(a).split('.').map(Number), y = String(b
 function agoText(ms) { const m = Math.round(ms / 60000); return m < 1 ? '방금' : m < 60 ? `${m}분 전` : m < 1440 ? `${Math.round(m / 60)}시간 전` : `${Math.round(m / 1440)}일 전`; }
 async function openVer() {
   $('#verModal').classList.remove('hidden'); $('#verModal .modal-box').scrollTop = 0;
+  const chromeVer = (navigator.userAgent.match(/Chrome\/(\d+)/) || [])[1] || '';
   const appVer = window.NFZApp && window.NFZApp.version ? (() => { try { return window.NFZApp.version(); } catch (e) { return ''; } })() : '';
   const row = (ico, name, val, lv) => `<div class="ver-row"><span>${ico} ${name}</span><b class="${lv === 'ok' ? 'q-good' : lv === 'mid' ? 'q-mid' : lv === 'bad' ? 'q-bad' : ''}">${val}</b></div>`;
   const render = (latest, geo, apkLatest) => {
@@ -2404,8 +2426,8 @@ async function openVer() {
     else apk = [`v${apkLatest}`, ''];
     $('#btnVerApk').classList.toggle('hidden', !!window.NFZApp && !apkNew);
     let h = `<div class="ver-sec">버전</div>` + row('🌐', '웹 화면', WEB_VER, '') + row('🔔', '웹 업데이트', upd[0], upd[1])
-      + (appVer ? row('📱', '설치된 앱', 'v' + esc(appVer), '') + row('🔔', '앱 업데이트', apk[0], apk[1]) : row('📱', '안드로이드 앱 최신', apk[0], apk[1]));
-    lines.push(`하코 NFZ 조회 웹 ${WEB_VER} · 웹 업데이트: ${upd[0]}`, appVer ? `설치된 앱 v${appVer} · 앱 업데이트: ${apk[0]}` : `안드로이드 앱 최신: ${apk[0]}`);
+      + (appVer ? row('📱', '설치된 앱', 'v' + esc(appVer) + (chromeVer ? ` · 화면 엔진 ${chromeVer}` : ''), '') + row('🔔', '앱 업데이트', apk[0], apk[1]) : row('📱', '안드로이드 앱 최신', apk[0], apk[1]));
+    lines.push(`하코 NFZ 조회 웹 ${WEB_VER} · 웹 업데이트: ${upd[0]}`, appVer ? `설치된 앱 v${appVer} (화면 엔진 ${chromeVer || '?'}) · 앱 업데이트: ${apk[0]}` : `안드로이드 앱 최신: ${apk[0]}`);
     // ② 데이터 상태
     const d = [];
     if (!lastResult) d.push(['🗺', '공역 자료(브이월드)', '아직 조회 전', '']);

@@ -35,6 +35,7 @@ button.badge:active{background:rgba(255,255,255,.35)}
 .ver-sec{font-size:11px;font-weight:800;color:var(--muted);margin:12px 0 4px}
 .ver-row{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-top:1px solid var(--line);font-size:12.5px}
 .ver-row b{text-align:right;word-break:keep-all}
+.ver-row > span:first-child{flex:none;white-space:nowrap}
 .ver-row b.q-good{color:var(--green)} .ver-row b.q-mid{color:#e65100} .ver-row b.q-bad{color:var(--red)}
 .ver-log{margin:0;padding-left:16px;font-size:12px;line-height:1.6}
 .ver-log b{color:var(--primary)}
