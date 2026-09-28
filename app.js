@@ -1198,7 +1198,16 @@ function geoWatch(ok, fail, opt) {
   const goNative = (remember) => {
     if (h.nat) return;
     if (h.web != null) { navigator.geolocation.clearWatch(h.web); h.web = null; }
-    h.nat = nativeSub((p, o) => { if (o.age > 30000) return; if (remember) { rememberNative(); remember = false; } ok(p); }, fail);
+    let last = null, lastGps = 0;
+    h.nat = nativeSub((p, o) => {
+      if (o.age > 30000) return;
+      // 같은 위치가 겹쳐 오거나, GPS가 잡히는 중에 덜 정확한 통신망 위치가 끼어들면 무시 (계기판 깜빡임 방지)
+      if (last && Math.abs(p.timestamp - last.timestamp) < 400 && p.coords.latitude === last.coords.latitude && p.coords.longitude === last.coords.longitude) return;
+      if (o.prov === 'gps') lastGps = Date.now(); else if (Date.now() - lastGps < 10000) return;
+      last = p;
+      if (remember) { rememberNative(); remember = false; }
+      ok(p);
+    }, fail);
   };
   if (geoNative || !navigator.geolocation) { if (NATIVE_GEO) goNative(); else setTimeout(() => fail({ code: 2 })); return h; }
   let got = false;
@@ -2359,6 +2368,7 @@ $('#btnDiagCopy').addEventListener('click', async () => {
 /* ───────── 앱 정보 창 (상단 버전 배지를 누르면) ─────────
    버전·업데이트 확인 / 데이터 상태 / 최근 바뀐 점 / 강제 새로고침·상태 복사·앱 설치·자세히 진단 */
 const CHANGELOG = [
+  ['v1.69', '앱: 옛 기종에서 실시간 추적 중 계기판·위치 아이콘이 깜빡이던 문제 수정'],
   ['v1.68', '앱: 옛 기종·차량용 기기에서도 내 위치 (기기 GPS에서 직접) · 처음 켤 때 위치 권한 묻기 · 위치 실패 이유 안내'],
   ['v1.67', '앱 정보의 위치 권한을 앱 권한·GPS 켜짐까지 정확하게 확인'],
   ['v1.66', '앱 정보에서 설치된 앱(APK)도 최신인지 확인'],
