@@ -1229,11 +1229,14 @@ function geoErrText(err) {
 }
 
 /* ───────── 현재 위치 ───────── */
+// 내 위치 점·오차 원은 공역 경계와 다른 층에 그림 — 점이 움직일 때마다 복잡한 경계선까지 다시 그리지 않게(화면 하얗게 깜빡임 방지)
+let meRenderer = null;
 function showMe(lat, lon, accuracy) {
-  if (meMarker) { meMarker.setLatLng([lat, lon]); meCircle.setLatLng([lat, lon]).setRadius(accuracy); }
+  if (meMarker) { meMarker.setLatLng([lat, lon]); meCircle.setLatLng([lat, lon]); if (meCircle.getRadius() !== accuracy) meCircle.setRadius(accuracy); }
   else {
-    meCircle = L.circle([lat, lon], { radius: accuracy, stroke: false, fillColor: '#1e88e5', fillOpacity: 0.16, interactive: false }).addTo(map); // GPS 정확도 반경
-    meMarker = L.circleMarker([lat, lon], { radius: 8, color: '#fff', weight: 3, fillColor: '#1e88e5', fillOpacity: 1 }).addTo(map);
+    if (!meRenderer) { map.createPane('mePane').style.zIndex = 590; meRenderer = L.svg({ pane: 'mePane', padding: 0.1 }); }
+    meCircle = L.circle([lat, lon], { radius: accuracy, stroke: false, fillColor: '#1e88e5', fillOpacity: 0.16, interactive: false, renderer: meRenderer }).addTo(map); // GPS 정확도 반경
+    meMarker = L.circleMarker([lat, lon], { radius: 8, color: '#fff', weight: 3, fillColor: '#1e88e5', fillOpacity: 1, renderer: meRenderer }).addTo(map);
   }
 }
 // opt.quiet: 알림 없이 / opt.fallback: 실패하면 이 지점을 판정 / opt.keepView: 지도 위치 유지
@@ -1524,7 +1527,7 @@ function animateMe(lat, lon, acc, dur) {
   if (!meMarker) { showMe(lat, lon, acc); return; }
   const from = meMarker.getLatLng(), t0 = performance.now(), ms = dur * 1000;
   if (meAnim) cancelAnimationFrame(meAnim);
-  meCircle.setRadius(acc);
+  if (meCircle.getRadius() !== acc) meCircle.setRadius(acc);
   const step = now => {
     const k = Math.min(1, (now - t0) / ms);
     const ll = [from.lat + (lat - from.lat) * k, from.lng + (lon - from.lng) * k];
@@ -1574,7 +1577,10 @@ function onTrackPos(p) {
   const paused = mapPaused();
   const dur = Math.max(0.25, Math.min(1.5, gap * 0.95)); // 위치가 오는 간격에 맞춰 이동 시간을 정함
   const jump = meMarker && distM([meMarker.getLatLng().lat, meMarker.getLatLng().lng], [lat, lon]) > 2000; // 순간이동급이면 애니메이션 없이
-  if (jump || !meMarker || paused) showMe(lat, lon, accuracy); else animateMe(lat, lon, accuracy, dur);
+  // 제자리(화면에서 3픽셀 미만 이동)면 점도 지도도 움직이지 않음 — 서 있을 때 GPS가 1~2m씩 흔들려 화면이 쉬지 않고 다시 그려지던 것 방지
+  const still = !!meMarker && !jump && map.latLngToContainerPoint(meMarker.getLatLng()).distanceTo(map.latLngToContainerPoint([lat, lon])) < 3;
+  if (still) { if (meCircle.getRadius() !== accuracy) meCircle.setRadius(accuracy); }
+  else if (jump || !meMarker || paused) showMe(lat, lon, accuracy); else animateMe(lat, lon, accuracy, dur);
   lastPos = [lat, lon];
   updateHud(p.coords, p.timestamp || now);
   if (!paused) renderHudExtra();
@@ -1582,7 +1588,7 @@ function onTrackPos(p) {
   if (trackFollow && !paused) {
     const zt = autoZoomTarget();
     if (jump) { if (zt != null && zt !== map.getZoom()) appZoomUntil = Date.now() + 1500; setViewVisible([lat, lon], zt != null ? zt : map.getZoom()); }
-    else followTo([lat, lon], dur, zt);
+    else if (!still || (zt != null && zt !== map.getZoom())) followTo([lat, lon], dur, zt);
   }
   const moved = !trackLast || distM(trackLast, [lat, lon]) >= TRACK_MOVE_M;
   if (trackFollow && moved && // 다른 지점을 보고 있는 동안(잠시 멈춤)에는 판정을 덮어쓰지 않음
@@ -2162,14 +2168,29 @@ function drawNotams() {
     else { quietToggle = true; notamLayer.addTo(map); quietToggle = false; }
   }
   notamLayer.clearLayers();
+  notamShapes = [];
   for (const it of notamList()) {
     if (!it.geometry) continue;
     const on = notamStatus(it) === 'active';
-    L.geoJSON(it.geometry, { interactive: false, style: {
+    const lay = L.geoJSON(it.geometry, { interactive: false, style: {
       color: on ? '#c62828' : '#ef6c00', weight: 2, dashArray: on ? '5 4' : '2 6',
-      fillColor: on ? '#e53935' : '#ef6c00', fillOpacity: on ? 0.14 : 0.05 } }).addTo(notamLayer);
+      fillColor: on ? '#e53935' : '#ef6c00', fillOpacity: on ? 0.14 : 0.05 } });
+    notamShapes.push({ lay, b: lay.getBounds() });
+  }
+  syncNotamView();
+}
+// 전국 고시보(200개 넘음)를 한꺼번에 올려 두면 지도가 움직일 때마다(실시간 추적 중엔 1초마다) 전부 다시 그려져
+// 화면이 하얗게 깜빡임 → 지금 보이는 화면(+주변 절반) 안의 것만 지도에 올림
+let notamShapes = [];
+function syncNotamView() {
+  if (!notamLayer || !notamShapes.length) return;
+  const vb = map.getBounds().pad(0.5);
+  for (const s of notamShapes) {
+    const want = s.b.isValid() && vb.intersects(s.b), has = notamLayer.hasLayer(s.lay);
+    if (want && !has) notamLayer.addLayer(s.lay); else if (!want && has) notamLayer.removeLayer(s.lay);
   }
 }
+map.on('moveend', syncNotamView);
 function refPoint() {
   if (lastResult) return [lastResult.lat, lastResult.lon];
   if (meMarker) { const p = meMarker.getLatLng(); return [p.lat, p.lng]; }
@@ -2388,6 +2409,7 @@ $('#btnDiagCopy').addEventListener('click', async () => {
 /* ───────── 앱 정보 창 (상단 버전 배지를 누르면) ─────────
    버전·업데이트 확인 / 데이터 상태 / 최근 바뀐 점 / 강제 새로고침·상태 복사·앱 설치·자세히 진단 */
 const CHANGELOG = [
+  ['v1.71', '실시간 추적 화면이 하얗게 깜빡이던 문제 개선 (화면 밖 고시보는 그리지 않음 · 제자리에선 지도 고정 · 내 위치 점을 따로 그림)'],
   ['v1.70', '실시간 추적 중 창을 열면 지도 움직임을 멈춤 (차량용 기기에서 창이 하얗게 멈추던 문제)'],
   ['v1.69', '앱: 옛 기종에서 실시간 추적 중 계기판·위치 아이콘이 깜빡이던 문제 수정'],
   ['v1.68', '앱: 옛 기종·차량용 기기에서도 내 위치 (기기 GPS에서 직접) · 처음 켤 때 위치 권한 묻기 · 위치 실패 이유 안내'],
