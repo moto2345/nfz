@@ -1088,6 +1088,20 @@ function renderMiscContacts() {
   el.innerHTML = CONTACTS.misc.map(e => `<div class="ct-org"><span>${esc(e.area)} · ${esc(e.org)}</span><span class="ct-tels">${e.tel.map(telHtml).join('<i>·</i>')}</span>${e.note ? `<small>${esc(e.note)}</small>` : ''}</div>`).join('');
 }
 
+// 좌표 표기: 도분초 (N 35°07'34.1")
+function dmsOf(v) { const t = Math.round(Math.abs(v) * 36000) / 10, d = Math.floor(t / 3600), m = Math.floor((t - d * 3600) / 60), sec = (t - d * 3600 - m * 60).toFixed(1); return `${d}°${String(m).padStart(2, '0')}'${sec.padStart(4, '0')}"`; }
+const coordDec = r => `${r.lat.toFixed(5)}, ${r.lon.toFixed(5)}`;
+const coordDms = r => `${r.lat >= 0 ? 'N' : 'S'} ${dmsOf(r.lat)} ${r.lon >= 0 ? 'E' : 'W'} ${dmsOf(r.lon)}`;
+// 클립보드 복사 (앱·옛 브라우저는 예전 방식으로 한 번 더)
+async function copyToClip(text, msg) {
+  let ok = false;
+  try { await navigator.clipboard.writeText(text); ok = true; } catch (e) {}
+  if (!ok) try {
+    const ta = document.createElement('textarea'); ta.value = text; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+    document.body.appendChild(ta); ta.select(); ok = document.execCommand('copy'); ta.remove();
+  } catch (e) {}
+  if (ok) toast(msg || '복사했어요'); else prompt('아래 내용을 복사하세요', text);
+}
 function renderResult(r) {
   const v = r.verdict;
   const addrLine = r.label || (r.addr && (r.addr.road || r.addr.parcel)) || '선택한 지점';
@@ -1095,7 +1109,11 @@ function renderResult(r) {
   const sub = !isMe && r.addr && r.addr.road && r.addr.parcel ? r.addr.parcel : '';
   let h = `<div class="verdict ${v.cls}"><div class="ico">${v.ico}</div><div><b>${v.title}</b><small>${esc(v.desc)}</small></div></div>
     ${v.code === 'partial' || v.code === 'error' ? `<div class="recheck"><button class="btn sm primary" id="btnRecheck">⟳ 다시 확인</button><span class="muted small" id="recheckNote"></span></div>` : ''}
-    <p class="addr"><b>${esc(addrLine)}</b><br><span class="muted">${isMe ? '위도 ' + r.lat.toFixed(5) + ' · 경도 ' + r.lon.toFixed(5) : esc(sub) + ' ' + r.lat.toFixed(5) + ', ' + r.lon.toFixed(5)}</span></p>
+    <p class="addr"><b>${esc(addrLine)}</b>${sub ? `<br><span class="muted">${esc(sub)}</span>` : ''}</p>
+    <div class="coords">
+      <button type="button" class="coord" data-copy="${coordDec(r)}" title="눌러서 복사"><span>위경도</span>${coordDec(r)}<i>⧉</i></button>
+      <button type="button" class="coord" data-copy="${esc(coordDms(r))}" title="눌러서 복사"><span>도분초</span>${esc(coordDms(r))}<i>⧉</i></button>
+    </div>
     <div class="row-btns">
       <button class="btn sm" id="btnFav">☆ 장소 저장</button>
       <button class="btn sm" id="btnLogHere">📒 기록 추가</button>
@@ -1128,13 +1146,12 @@ function renderResult(r) {
 
 // 비행승인·촬영허가 신청서에 붙여넣기 좋게 정리
 async function copyPoint(r) {
-  const dms = v => { const t = Math.round(Math.abs(v) * 36000) / 10, d = Math.floor(t / 3600), m = Math.floor((t - d * 3600) / 60), sec = (t - d * 3600 - m * 60).toFixed(1); return `${d}°${m}'${sec}"`; };
   const zones = [...new Set(r.inside.map(x => x.zone.name + (x.label ? ` (${x.label})` : '')))].join(', ') || '해당 없음';
   const text = [
     `주소: ${(r.addr && (r.addr.road || r.addr.parcel)) || r.label || '-'}`,
     r.addr && r.addr.road && r.addr.parcel ? `지번: ${r.addr.parcel}` : '',
     `좌표: ${r.lat.toFixed(6)}, ${r.lon.toFixed(6)}`,
-    `좌표(도분초): N ${dms(r.lat)} / E ${dms(r.lon)}`,
+    `좌표(도분초): ${coordDms(r)}`,
     `해당 공역: ${zones}`,
     `판정: ${r.verdict.title}`
   ].filter(Boolean).join('\n');
@@ -1565,6 +1582,13 @@ map.on('zoomstart', () => {
   if (trackId == null || Date.now() < appZoomUntil) return;
   if (Date.now() - manualZoomAt > 30000) toast('직접 축척을 바꿔서 자동 축척을 30초 동안 멈춰요', 2500);
   manualZoomAt = Date.now(); autoZ = null; zCand = null; // 다시 켜질 땐 그때 속도에 맞는 축척으로 바로
+});
+// 결과창 좌표를 누르면 복사
+document.addEventListener('click', e => {
+  const b = e.target.closest && e.target.closest('.coord[data-copy]');
+  if (!b) return;
+  copyToClip(b.dataset.copy, `복사했어요: ${b.dataset.copy}`);
+  b.classList.add('copied'); setTimeout(() => b.classList.remove('copied'), 1200);
 });
 // 창(날씨·고시보·앱 정보 등)이 열려 있거나 다른 탭을 보는 중이면 지도 움직임을 멈춤 —
 // 차량용 안드로이드처럼 그래픽이 약한 기기에서 지도가 계속 움직이면 새 창을 못 그려 하얗게 멈추는 문제 방지
@@ -2409,6 +2433,7 @@ $('#btnDiagCopy').addEventListener('click', async () => {
 /* ───────── 앱 정보 창 (상단 버전 배지를 누르면) ─────────
    버전·업데이트 확인 / 데이터 상태 / 최근 바뀐 점 / 강제 새로고침·상태 복사·앱 설치·자세히 진단 */
 const CHANGELOG = [
+  ['v1.72', '지점 좌표를 위경도·도분초 두 가지로 표시 · 누르면 복사'],
   ['v1.71', '실시간 추적 화면이 하얗게 깜빡이던 문제 개선 (화면 밖 고시보는 그리지 않음 · 제자리에선 지도 고정 · 내 위치 점을 따로 그림)'],
   ['v1.70', '실시간 추적 중 창을 열면 지도 움직임을 멈춤 (차량용 기기에서 창이 하얗게 멈추던 문제)'],
   ['v1.69', '앱: 옛 기종에서 실시간 추적 중 계기판·위치 아이콘이 깜빡이던 문제 수정'],
