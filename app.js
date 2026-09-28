@@ -1157,6 +1157,68 @@ function drawZones(r) {
   }
 }
 
+/* ───────── 위치 받기: 웹 위치 기능 → 안 되면 앱이 기기 GPS에서 직접 (옛 기종·차량용 기기 대비) ───────── */
+const NATIVE_GEO = !!(window.NFZApp && window.NFZApp.locStart);
+let geoNative = NATIVE_GEO && (() => { try { return localStorage.getItem('geoNative') === '1'; } catch (e) { return false; } })();
+const nativeSubs = new Map(); let nativeSeq = 0;
+function appLocPerm() { try { return window.NFZApp && window.NFZApp.locPerm ? JSON.parse(window.NFZApp.locPerm()) : null; } catch (e) { return null; } }
+function rememberNative() { geoNative = true; try { localStorage.setItem('geoNative', '1'); } catch (e) {} }
+window.nfzNativeLoc = o => {
+  const p = { coords: { latitude: o.lat, longitude: o.lon, accuracy: o.acc != null ? o.acc : 50, altitude: o.alt, altitudeAccuracy: null, speed: o.spd, heading: o.hdg }, timestamp: o.t || Date.now() };
+  [...nativeSubs.values()].forEach(s => s.ok(p, o));
+};
+window.nfzNativeErr = (code, why) => { [...nativeSubs.values()].forEach(s => s.fail({ code, why, native: true })); };
+function nativeSub(ok, fail) {
+  const id = ++nativeSeq; nativeSubs.set(id, { ok, fail });
+  try { window.NFZApp.locStart(); } catch (e) {}
+  return id;
+}
+function nativeUnsub(id) { nativeSubs.delete(id); if (!nativeSubs.size) try { window.NFZApp.locStop(); } catch (e) {} }
+// 웹 위치가 이렇게 실패하면 앱 직접 위치로 넘어감 (권한 거부는 앱 권한이 실제로 있을 때만 — 다시 묻지 않게)
+function webGeoBroken(err) { if (!NATIVE_GEO) return false; if (err.code !== 1) return true; const lp = appLocPerm(); return !!(lp && (lp.fine || lp.coarse)); }
+function geoGet(ok, fail, opt) {
+  const viaNative = (remember) => {
+    let done = false, stale = null, tm = null;
+    const end = () => { done = true; clearTimeout(tm); nativeUnsub(id); };
+    const id = nativeSub((p, o) => {
+      if (done) return;
+      if (o.age > 60000) { if (!stale) stale = p; return; } // 오래된 위치는 새 위치를 기다리는 동안 보관만
+      end(); if (remember) rememberNative(); ok(p);
+    }, e => { if (done || (e.code === 2 && stale)) return; end(); fail(e); });
+    tm = setTimeout(() => { if (done) return; end(); stale ? ok(stale) : fail({ code: 3, native: true }); }, 25000);
+  };
+  if (geoNative || !navigator.geolocation) return NATIVE_GEO ? viaNative() : fail({ code: 2 });
+  navigator.geolocation.getCurrentPosition(ok, err => {
+    if (!webGeoBroken(err)) return fail(err);
+    viaNative(err.code !== 3); // 앱 쪽이 실제로 잡히면 다음부터 바로 앱으로 (시간 초과는 신호 탓일 수 있어 기억 안 함)
+  }, opt);
+}
+function geoWatch(ok, fail, opt) {
+  const h = { web: null, nat: null };
+  const goNative = (remember) => {
+    if (h.nat) return;
+    if (h.web != null) { navigator.geolocation.clearWatch(h.web); h.web = null; }
+    h.nat = nativeSub((p, o) => { if (o.age > 30000) return; if (remember) { rememberNative(); remember = false; } ok(p); }, fail);
+  };
+  if (geoNative || !navigator.geolocation) { if (NATIVE_GEO) goNative(); else setTimeout(() => fail({ code: 2 })); return h; }
+  let got = false;
+  h.web = navigator.geolocation.watchPosition(p => { got = true; ok(p); }, err => {
+    if (!got && webGeoBroken(err)) goNative(err.code !== 3);
+    else fail(err);
+  }, opt);
+  return h;
+}
+function geoClear(h) { if (!h) return; if (h.web != null) navigator.geolocation.clearWatch(h.web); if (h.nat) nativeUnsub(h.nat); h.web = h.nat = null; }
+// 실패 이유를 알기 쉽게
+function geoErrText(err) {
+  const lp = appLocPerm();
+  if (err.code === 1) return lp ? '위치 권한이 꺼져 있어요. 휴대폰 설정 → 애플리케이션 → 하코 NFZ → 권한에서 위치를 허용해 주세요.' : '위치 권한이 거부되었습니다. 브라우저 설정에서 허용해 주세요.';
+  if (err.why === 'nogps' || (lp && lp.hasGps === false && !lp.net)) return '이 기기는 GPS가 없어 위치를 알 수 없어요. 지도를 눌러 지점을 직접 골라 주세요.';
+  if (err.why === 'off' || (lp && !lp.gps && !lp.net)) return '기기의 위치(GPS)가 꺼져 있어요. 설정에서 위치를 켠 뒤 다시 눌러 주세요.';
+  if (err.code === 3) return '위치를 찾는 데 너무 오래 걸려요. 하늘이 트인 곳에서 다시 시도해 주세요.';
+  return '위치를 가져오지 못했습니다. 기기의 위치(GPS)가 켜져 있는지 확인해 주세요.';
+}
+
 /* ───────── 현재 위치 ───────── */
 function showMe(lat, lon, accuracy) {
   if (meMarker) { meMarker.setLatLng([lat, lon]); meCircle.setLatLng([lat, lon]).setRadius(accuracy); }
@@ -1167,10 +1229,10 @@ function showMe(lat, lon, accuracy) {
 }
 // opt.quiet: 알림 없이 / opt.fallback: 실패하면 이 지점을 판정 / opt.keepView: 지도 위치 유지
 function locateMe(opt = {}) {
-  if (!navigator.geolocation) { if (opt.fallback) checkAt(opt.fallback.lat, opt.fallback.lon, opt.fallback.label); else toast('이 기기는 위치 기능을 지원하지 않습니다.'); return; }
+  if (!navigator.geolocation && !NATIVE_GEO) { if (opt.fallback) checkAt(opt.fallback.lat, opt.fallback.lon, opt.fallback.label); else toast('이 기기는 위치 기능을 지원하지 않습니다.'); return; }
   if (!opt.quiet) toast('현재 위치를 찾는 중…');
   const fab = $('#btnLocate'); fab.classList.add('locating');
-  navigator.geolocation.getCurrentPosition(p => {
+  geoGet(p => {
     fab.classList.remove('locating'); fab.classList.add('found');
     const { latitude: lat, longitude: lon, accuracy } = p.coords;
     showMe(lat, lon, accuracy);
@@ -1186,7 +1248,7 @@ function locateMe(opt = {}) {
   }, err => {
     fab.classList.remove('locating', 'found');
     if (opt.fallback) { checkAt(opt.fallback.lat, opt.fallback.lon, opt.fallback.label === '내 위치' ? '마지막으로 확인한 내 위치' : opt.fallback.label); return; }
-    toast(err.code === 1 ? '위치 권한이 거부되었습니다. 브라우저 설정에서 허용해 주세요.' : '위치를 가져오지 못했습니다.');
+    toast(geoErrText(err), 4500);
   }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 });
 }
 // 나침반·드론 컴퍼스 보정 안내
@@ -1510,10 +1572,11 @@ function onTrackPos(p) {
   }
 }
 function startTrack() {
-  if (!navigator.geolocation) return toast('이 기기는 위치 기능을 지원하지 않습니다.');
+  if (!navigator.geolocation && !NATIVE_GEO) return toast('이 기기는 위치 기능을 지원하지 않습니다.');
   trackFollow = true; trackLast = null; trackAt = 0; trackCode = lastResult && lastResult.label === '내 위치' ? lastResult.verdict.code : null;
-  trackId = navigator.geolocation.watchPosition(onTrackPos, err => {
-    if (err.code === 1) { stopTrack(); toast('위치 권한이 거부되었습니다. 브라우저 설정에서 허용해 주세요.'); }
+  trackId = geoWatch(onTrackPos, err => {
+    if (err.code === 1) { stopTrack(true); toast(geoErrText(err), 4500); }
+    else if (err.native && err.code === 2) toast(geoErrText(err), 4500); // 위치 꺼짐·GPS 없음 (켜면 자동으로 다시 받음)
     else toast('위치 신호가 약합니다. 계속 찾는 중…');
   }, { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }); // 저장된 옛 위치 말고 늘 새 위치
   keepAwake(true);
@@ -1528,7 +1591,7 @@ function startTrack() {
   toast('실시간 위치 추적을 켰어요. 움직이면 판정이 바로 바뀌고, 더 엄격한 구역에 들어가면 진동으로 알려줘요.', 4000);
 }
 function stopTrack(quiet) {
-  if (trackId != null) navigator.geolocation.clearWatch(trackId);
+  if (trackId != null) geoClear(trackId);
   trackId = null; keepAwake(false); compass(false); gpsHeading = null;
   $('#navHud').classList.add('hidden');
   satPoll(false);
@@ -2296,6 +2359,7 @@ $('#btnDiagCopy').addEventListener('click', async () => {
 /* ───────── 앱 정보 창 (상단 버전 배지를 누르면) ─────────
    버전·업데이트 확인 / 데이터 상태 / 최근 바뀐 점 / 강제 새로고침·상태 복사·앱 설치·자세히 진단 */
 const CHANGELOG = [
+  ['v1.68', '앱: 옛 기종·차량용 기기에서도 내 위치 (기기 GPS에서 직접) · 처음 켤 때 위치 권한 묻기 · 위치 실패 이유 안내'],
   ['v1.67', '앱 정보의 위치 권한을 앱 권한·GPS 켜짐까지 정확하게 확인'],
   ['v1.66', '앱 정보에서 설치된 앱(APK)도 최신인지 확인'],
   ['v1.65', '앱: 뒤로가기로 열린 창 닫기 · 두 번 눌러야 종료'],
@@ -2345,16 +2409,18 @@ async function openVer() {
     d.push(['🌤', '날씨', lastResult && lastResult.wx ? `받음 · ${agoText(Date.now() - (lastResult.wxAt || Date.now()))}` : lastResult ? '받지 못함' : '아직 조회 전', lastResult && lastResult.wx ? 'ok' : lastResult ? 'mid' : '']);
     const acc = lastResult && lastResult.label === '내 위치' && lastResult.acc ? ` · 오차 ±${Math.round(lastResult.acc)}m` : '';
     // 위치: 앱이면 안드로이드 권한·위치 서비스를 직접 확인, 웹이면 브라우저 권한 + 이번에 위치를 실제로 받았는지
-    let lp = null; try { lp = window.NFZApp && window.NFZApp.locPerm ? JSON.parse(window.NFZApp.locPerm()) : null; } catch (e) {}
+    const lp = appLocPerm();
     const gotFix = !!meMarker;
     let loc;
     if (lp) loc = !lp.fine && !lp.coarse ? ['거부됨 (폰 설정 → 앱 → 권한에서 허용)', 'bad']
+      : lp.hasGps === false ? (lp.net ? ['허용됨 · GPS 없는 기기라 통신망 위치만 (오차 큼)', 'mid'] : ['허용됨 · 이 기기는 GPS가 없어요', 'bad'])
       : !lp.gps ? ['허용됨 · 폰 위치(GPS)가 꺼져 있어요', 'bad']
       : !lp.fine ? ['대략적 위치만 허용 (정확한 위치를 켜 주세요)', 'mid'] : ['허용됨 (정확한 위치)' + acc, 'ok'];
     else if (geo === 'denied') loc = ['거부됨 (브라우저 설정에서 허용)', 'bad'];
     else if (geo === 'granted' || gotFix) loc = ['허용됨' + acc, 'ok'];
     else if (geo === 'prompt') loc = ['아직 확인 전 (⌖ 내 위치를 누르면 확인돼요)', ''];
     else loc = ['확인 불가', ''];
+    if (lp && geoNative) loc[0] += ' · 앱이 GPS에서 직접 받는 중';
     d.push(['📍', '위치 권한', loc[0], loc[1]]);
     h += `<div class="ver-sec">데이터 상태</div>` + d.map(x => row(...x)).join('');
     lines.push(...d.map(x => `${x[1]}: ${x[2].replace(/<[^>]+>/g, '')}`));
