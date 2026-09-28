@@ -1670,6 +1670,20 @@ function pauseTrackFollow() { if (trackId != null && trackFollow) { trackFollow 
 map.on('dragstart', pauseTrackFollow);
 // 화면이 꺼졌다 다시 켜지면 화면 켜짐 유지를 다시 요청
 document.addEventListener('visibilitychange', () => { if (!document.hidden && trackId != null) keepAwake(true); });
+// 다른 앱에 갔다 돌아오면 폰이 화면 그림을 비워 두는 경우가 있어(특히 결과창처럼 스크롤되는 부분이 하얗게 남음) 전체를 다시 그리게 함
+function repaintAll() {
+  try { map.invalidateSize(false); } catch (e) {}
+  document.querySelectorAll('#sheetBody, .page, .modal:not(.hidden) .modal-box, #notamList, #kpCard, .dropdown').forEach(el => {
+    const st = el.scrollTop; el.scrollTop = st + 1; el.scrollTop = st; // 스크롤 영역을 새로 그리게
+    el.style.opacity = '0.999';
+  });
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    document.querySelectorAll('#sheetBody, .page, .modal-box, #notamList, #kpCard, .dropdown').forEach(el => { el.style.opacity = ''; });
+  }));
+}
+window.nfzResume = () => { repaintAll(); setTimeout(repaintAll, 400); };
+document.addEventListener('visibilitychange', () => { if (!document.hidden) window.nfzResume(); });
+window.addEventListener('pageshow', e => { if (e.persisted) window.nfzResume(); });
 
 /* ───────── 검색 & 즐겨찾기 ───────── */
 const resultsBox = $('#searchResults');
@@ -2433,6 +2447,7 @@ $('#btnDiagCopy').addEventListener('click', async () => {
 /* ───────── 앱 정보 창 (상단 버전 배지를 누르면) ─────────
    버전·업데이트 확인 / 데이터 상태 / 최근 바뀐 점 / 강제 새로고침·상태 복사·앱 설치·자세히 진단 */
 const CHANGELOG = [
+  ['v1.73', '다른 앱에 갔다 돌아오면 결과창이 하얗게 비어 보이던 문제 수정'],
   ['v1.72', '지점 좌표를 위경도·도분초 두 가지로 표시 · 누르면 복사'],
   ['v1.71', '실시간 추적 화면이 하얗게 깜빡이던 문제 개선 (화면 밖 고시보는 그리지 않음 · 제자리에선 지도 고정 · 내 위치 점을 따로 그림)'],
   ['v1.70', '실시간 추적 중 창을 열면 지도 움직임을 멈춤 (차량용 기기에서 창이 하얗게 멈추던 문제)'],
