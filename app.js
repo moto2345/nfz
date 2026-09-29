@@ -894,6 +894,119 @@ $('#btnWx').addEventListener('click', openWx);
 $('#btnWxClose').addEventListener('click', closeWx);
 $('#btnWxX').addEventListener('click', closeWx);
 $('#wxModal').addEventListener('click', e => { if (e.target.id === 'wxModal') closeWx(); });
+/* ───────── 물때(밀물·썰물) ─────────
+   Open-Meteo 해양 예보의 '조석이 포함된 해수면 높이'(약 8km 격자, 1시간 간격)로 만조·간조 시각을 계산.
+   공식 조석표(국립해양조사원)가 아니라 모델 예측이라 항구·만·섬 사이에선 실제와 차이가 날 수 있음 → 화면에 안내 */
+const tideCache = new Map();
+async function fetchTide(lat, lon) {
+  const key = lat.toFixed(2) + ',' + lon.toFixed(2), c = tideCache.get(key);
+  if (c && Date.now() - c.t < 3 * 3600e3) return c.d;
+  const r = await fetchT('https://marine-api.open-meteo.com/v1/marine?' + new URLSearchParams({
+    latitude: lat.toFixed(3), longitude: lon.toFixed(3), hourly: 'sea_level_height_msl',
+    timezone: 'Asia/Seoul', past_days: '1', forecast_days: '4', cell_selection: 'sea' }), {}, 12000);
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const j = await r.json();
+  const T = (j.hourly && j.hourly.time) || [], V = (j.hourly && j.hourly.sea_level_height_msl) || [];
+  const pts = T.map((t, i) => ({ t: Date.parse(t + ':00+09:00'), v: V[i] })).filter(x => isFinite(x.t) && x.v != null && isFinite(x.v));
+  const d = { pts, ext: tideExtremes(pts), glat: j.latitude, glon: j.longitude };
+  tideCache.set(key, { t: Date.now(), d });
+  return d;
+}
+// 1시간 값에서 만조·간조를 찾고, 앞뒤 3점으로 포물선을 맞춰 분 단위 시각·높이를 추정
+function tideExtremes(pts) {
+  const out = [];
+  for (let i = 1; i < pts.length - 1; i++) {
+    const a = pts[i - 1].v, b = pts[i].v, c = pts[i + 1].v;
+    const hi = b > a && b >= c, lo = b < a && b <= c;
+    if (!hi && !lo) continue;
+    const den = a - 2 * b + c, dx = den ? Math.max(-0.5, Math.min(0.5, (a - c) / (2 * den))) : 0;
+    const e = { hi, t: pts[i].t + dx * 3600e3, v: b - (a - c) * dx / 4 };
+    const last = out[out.length - 1];
+    if (last && last.hi === e.hi) { if (e.hi ? e.v > last.v : e.v < last.v) out[out.length - 1] = e; continue; } // 같은 종류가 연달아 나오면 더 극단인 것만
+    if (last && Math.abs(e.v - last.v) < 0.04) { out.pop(); continue; } // 아주 작은 출렁임은 무시
+    out.push(e);
+  }
+  return out;
+}
+function tideAt(pts, t) {
+  for (let i = 1; i < pts.length; i++) if (pts[i].t >= t) { const a = pts[i - 1], b = pts[i]; return a.v + (b.v - a.v) * (t - a.t) / (b.t - a.t); }
+  return null;
+}
+// 달 나이로 사리(조차 큼)·조금(조차 작음) 무렵 판단 (조석은 달보다 1~2일 늦게 따라옴)
+function tidePhase(t) {
+  const age = (((t - Date.UTC(2000, 0, 6, 18, 14)) / 864e5) % 29.530589 + 29.530589) % 29.530589;
+  const dist = x => Math.min(...[x, x + 14.765, x + 29.53].map(c => Math.abs(age - c)));
+  if (dist(1.5) <= 2.5) return { txt: '사리 무렵 · 물 높이 차이가 커요', cls: 'q-bad' };
+  if (dist(8.9) <= 2.5) return { txt: '조금 무렵 · 물 높이 차이가 작아요', cls: 'q-good' };
+  return { txt: '사리와 조금 사이', cls: '' };
+}
+const hm = t => { const d = new Date(t + 9 * 3600e3); return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`; };
+const kstDay = t => Math.floor((t + 9 * 3600e3) / 864e5);
+const tideH = v => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}m`;
+function tideSvg(d, now) {
+  const t0 = now - 6 * 3600e3, t1 = now + 24 * 3600e3, P = d.pts.filter(p => p.t >= t0 - 3600e3 && p.t <= t1 + 3600e3);
+  if (P.length < 4) return '';
+  const W = 320, H = 110, pad = 14, vs = P.map(p => p.v), mn = Math.min(...vs), mx = Math.max(...vs), rg = (mx - mn) || 1;
+  const X = t => ((t - t0) / (t1 - t0)) * W, Y = v => pad + (1 - (v - mn) / rg) * (H - 2 * pad - 12);
+  const line = P.map((p, i) => `${i ? 'L' : 'M'}${X(p.t).toFixed(1)},${Y(p.v).toFixed(1)}`).join('');
+  const area = line + `L${X(P[P.length - 1].t).toFixed(1)},${H - 12}L${X(P[0].t).toFixed(1)},${H - 12}Z`;
+  let marks = '';
+  for (const e of d.ext) if (e.t > t0 && e.t < t1) {
+    const x = X(e.t), y = Y(e.v);
+    marks += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.6" class="${e.hi ? 'th' : 'tl'}"/><text x="${x.toFixed(1)}" y="${(e.hi ? y - 5 : y + 11).toFixed(1)}" text-anchor="middle">${hm(e.t)}</text>`;
+  }
+  // 자정 구분선
+  let mid = '';
+  for (let k = kstDay(t0) + 1; k <= kstDay(t1); k++) { const t = k * 864e5 - 9 * 3600e3, x = X(t); mid += `<line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="0" y2="${H - 12}" class="tmid"/><text x="${(x + 3).toFixed(1)}" y="${H - 2}" class="tday">${k === kstDay(now) + 1 ? '내일' : '모레'}</text>`; }
+  const nx = X(now), nv = tideAt(d.pts, now);
+  return `<svg class="tide-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+    <path d="${area}" class="tarea"/><path d="${line}" class="tline"/>${mid}
+    <line x1="${nx.toFixed(1)}" x2="${nx.toFixed(1)}" y1="0" y2="${H - 12}" class="tnow"/>${nv != null ? `<circle cx="${nx.toFixed(1)}" cy="${Y(nv).toFixed(1)}" r="4" class="tnowdot"/>` : ''}
+    <text x="${(nx + 3).toFixed(1)}" y="${H - 2}" class="tday now">지금</text>${marks}</svg>`;
+}
+function tideHtml(d, lat, lon) {
+  const now = Date.now();
+  if (!d.pts.length) return '<p class="muted small">이 지점은 바다에서 멀어 물때 정보가 없어요. 해안 가까운 곳을 눌러 확인해 보세요.</p>';
+  const far = isFinite(d.glat) ? distM([lat, lon], [d.glat, d.glon]) : 0;
+  const next = d.ext.find(e => e.t > now), cur = tideAt(d.pts, now), ph = tidePhase(now);
+  const left = next ? next.t - now : 0, lh = Math.floor(left / 3600e3), lm = Math.round((left % 3600e3) / 60e3);
+  let h = `<div class="tide-now ${next ? (next.hi ? 'rising' : 'falling') : ''}">
+    <b>${next ? (next.hi ? '▲ 지금 밀물(들물) 중' : '▼ 지금 썰물(날물) 중') : '물때 계산 중'}</b>
+    ${next ? `<span>${next.hi ? '만조' : '간조'} <b>${hm(next.t)}</b> · ${lh ? lh + '시간 ' : ''}${lm}분 뒤</span>` : ''}
+    <small>지금 해수면 ${cur != null ? tideH(cur) : '-'} (평균해수면 기준) · <b class="${ph.cls}">${ph.txt}</b></small></div>`;
+  h += tideSvg(d, now);
+  const days = [kstDay(now), kstDay(now) + 1, kstDay(now) + 2, kstDay(now) + 3], names = ['오늘', '내일', '모레', '글피'];
+  h += '<table class="tide-tbl"><tbody>' + days.map((k, i) => {
+    const es = d.ext.filter(e => kstDay(e.t) === k);
+    if (!es.length) return '';
+    const dd = new Date(k * 864e5), lab = `${names[i]} <small>${dd.getUTCMonth() + 1}/${dd.getUTCDate()}</small>`;
+    const hs = es.filter(e => e.hi), ls = es.filter(e => !e.hi);
+    const rng = hs.length && ls.length ? Math.max(...hs.map(e => e.v)) - Math.min(...ls.map(e => e.v)) : null;
+    return `<tr><th>${lab}${rng != null ? `<small class="trng">차이 ${rng.toFixed(1)}m</small>` : ''}</th><td>${es.map(e =>
+      `<span class="tx ${e.hi ? 'hi' : 'lo'}${e.t < now ? ' past' : ''}">${e.hi ? '▲만조' : '▼간조'} <b>${hm(e.t)}</b> <small>${tideH(e.v)}</small></span>`).join('')}</td></tr>`;
+  }).join('') + '</tbody></table>';
+  h += `<p class="muted small tide-note">⚠️ 해양 예보 모델(약 8km 격자)로 계산한 참고값이에요${far > 3000 ? ` · 가장 가까운 바다 격자가 약 ${(far / 1000).toFixed(0)}km 떨어져 있어요` : ''}.
+    항구·만·섬 사이에선 실제와 30분 이상 다를 수 있으니, 갯벌·해안에서 이착륙할 땐
+    <a href="https://www.khoa.go.kr/swtc/mobile.do" target="_blank" rel="noopener">국립해양조사원 조석 예보</a>로 꼭 확인하세요.
+    물이 들어오는 속도가 빠른 서해안 갯벌은 특히 주의하세요.</p>`;
+  return h;
+}
+let tideSeq = 0;
+async function openTide() {
+  const [lat, lon] = refPoint();
+  $('#tideWhere').textContent = '📍 ' + (lastResult ? (lastResult.label === '내 위치' ? '내 위치' : (lastResult.addr && (lastResult.addr.road || lastResult.addr.parcel)) || lastResult.label || '확인한 지점') : meMarker ? '내 위치' : '지도 가운데') + ` (${lat.toFixed(3)}, ${lon.toFixed(3)})`;
+  $('#tideBox').innerHTML = '<div class="hint"><span class="spinner"></span>물때 확인 중…</div>';
+  $('#tideModal').classList.remove('hidden'); $('#tideModal .modal-box').scrollTop = 0;
+  const my = ++tideSeq;
+  try { const d = await fetchTide(lat, lon); if (my === tideSeq) $('#tideBox').innerHTML = tideHtml(d, lat, lon); }
+  catch (e) { if (my === tideSeq) $('#tideBox').innerHTML = '<p class="muted small">물때 정보를 불러오지 못했어요. 인터넷 연결을 확인하고 다시 눌러 주세요.</p>'; }
+}
+const closeTide = () => $('#tideModal').classList.add('hidden');
+$('#btnTide').addEventListener('click', openTide);
+$('#btnTideClose').addEventListener('click', closeTide);
+$('#btnTideX').addEventListener('click', closeTide);
+$('#tideModal').addEventListener('click', e => { if (e.target.id === 'tideModal') closeTide(); });
+
 function showWeather(r) {
   const box = $('#wxBox'); if (!box || !r.wx) return;
   box.innerHTML = weatherHtml(r.wx);
@@ -2466,6 +2579,7 @@ $('#btnDiagCopy').addEventListener('click', async () => {
 /* ───────── 앱 정보 창 (상단 버전 배지를 누르면) ─────────
    버전·업데이트 확인 / 데이터 상태 / 최근 바뀐 점 / 강제 새로고침·상태 복사·앱 설치·자세히 진단 */
 const CHANGELOG = [
+  ['v1.76', '상단 🌊 물때 버튼 — 만조·간조 시각, 밀물·썰물 흐름 그래프, 사리·조금 (4일)'],
   ['v1.75', '자동 축척 단계 변경: 5km/h 미만 20 · ~25 19 · ~50 18 · ~80 17 · ~100 16 · 그 이상 15 (지도 최대 20레벨)'],
   ['v1.74', '실시간 추적 자동 축척을 화면 크기에 맞춤 (가로·세로 폰, 태블릿, 차량용 화면)'],
   ['v1.73', '다른 앱에 갔다 돌아오면 결과창이 하얗게 비어 보이던 문제 수정'],
@@ -2598,5 +2712,5 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
 }
 
 // 테스트용 노출
-window.__dz = { startTrack, stopTrack, zoomFit, get tracking() { return trackId != null; }, runDiag, sunTimesKST, nationalGet, containsPoint, distToBoundary, makeVerdict, ZONES, hiddenZones, overlayZone, drawZones, notamStatus, scheduleText, scheduleState, kstDayWindows, get notamData() { return notamData; } };
+window.__dz = { startTrack, stopTrack, zoomFit, tideExtremes, tidePhase, get tracking() { return trackId != null; }, runDiag, sunTimesKST, nationalGet, containsPoint, distToBoundary, makeVerdict, ZONES, hiddenZones, overlayZone, drawZones, notamStatus, scheduleText, scheduleState, kstDayWindows, get notamData() { return notamData; } };
 })();

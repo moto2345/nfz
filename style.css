@@ -387,3 +387,25 @@ a.tel{color:var(--primary);text-decoration:none;border-bottom:1px solid rgba(21,
 .coord:active,.coord.copied{background:#e8f0fe;border-color:#1a73e8}
 .coord.copied i::after{content:" 복사됨";font-size:10px;font-weight:700}
 @media (prefers-color-scheme:dark){.coord:active,.coord.copied{background:#1e3a5f}}
+/* 물때 */
+@media (max-width:440px){ .tide-btn .wxb-txt{display:none} .tide-btn{padding:0 7px} }
+.tide-now{border-radius:10px;padding:9px 11px;margin:4px 0 6px;background:var(--bg);display:flex;flex-direction:column;gap:2px;font-size:12.5px}
+.tide-now > b{font-size:14px}
+.tide-now.rising > b{color:#1565c0} .tide-now.falling > b{color:#00897b}
+.tide-now small{color:var(--muted);font-size:11px}
+.tide-now small b.q-bad{color:var(--red)} .tide-now small b.q-good{color:var(--green)}
+.tide-svg{width:100%;height:120px;display:block;margin:2px 0 6px}
+.tide-svg .tarea{fill:rgba(30,136,229,.13)} .tide-svg .tline{fill:none;stroke:#1e88e5;stroke-width:2;vector-effect:non-scaling-stroke}
+.tide-svg .tnow{stroke:#e53935;stroke-width:1.5;stroke-dasharray:3 3;vector-effect:non-scaling-stroke} .tide-svg .tnowdot{fill:#e53935;stroke:#fff;stroke-width:1.5}
+.tide-svg .tmid{stroke:var(--line);stroke-width:1;vector-effect:non-scaling-stroke}
+.tide-svg text{font-size:9px;fill:var(--muted)} .tide-svg .tday.now{fill:#e53935;font-weight:700}
+.tide-svg .th{fill:#1565c0} .tide-svg .tl{fill:#00897b}
+.tide-tbl{width:100%;border-collapse:collapse;font-size:12px}
+.tide-tbl th{text-align:left;font-weight:800;white-space:nowrap;padding:6px 6px 6px 0;vertical-align:top;width:62px}
+.tide-tbl th small{display:block;font-weight:600;color:var(--muted);font-size:10px}
+.tide-tbl th small.trng{font-size:9.5px}
+.tide-tbl td{padding:5px 0;border-top:1px solid var(--line)} .tide-tbl th{border-top:1px solid var(--line)}
+.tide-tbl .tx{display:inline-block;margin:1px 8px 1px 0;white-space:nowrap}
+.tide-tbl .tx.hi{color:#1565c0} .tide-tbl .tx.lo{color:#00897b} .tide-tbl .tx small{color:var(--muted)}
+.tide-tbl .tx.past{opacity:.45}
+.tide-note{margin-top:8px;line-height:1.5}
