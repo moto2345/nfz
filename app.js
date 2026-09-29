@@ -692,12 +692,12 @@ function buildLayers() {
   baseLayers = {}; overlayLayers = {};
   const key = vkey();
   if (key) {
-    const vw = (name, ext) => L.tileLayer(`https://api.vworld.kr/req/wmts/1.0.0/${key}/${name}/{z}/{y}/{x}.${ext}`, { maxZoom: 19, minZoom: 6, attribution: '© V-World' });
+    const vw = (name, ext) => L.tileLayer(`https://api.vworld.kr/req/wmts/1.0.0/${key}/${name}/{z}/{y}/{x}.${ext}`, { maxZoom: 20, maxNativeZoom: 19, minZoom: 6, attribution: '© V-World' });
     baseLayers['기본지도'] = vw('Base', 'png');
     const sat = vw('Satellite', 'jpeg'), hyb = vw('Hybrid', 'png');
     baseLayers['위성지도'] = L.layerGroup([sat, hyb]);
   } else {
-    baseLayers['OpenStreetMap'] = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' });
+    baseLayers['OpenStreetMap'] = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 20, maxNativeZoom: 19, attribution: '© OpenStreetMap' });
   }
   const firstBase = Object.values(baseLayers)[0]; firstBase.addTo(map);
   layerCtl = L.control.layers(baseLayers, {}, { position: 'topright', collapsed: true }).addTo(map);
@@ -726,7 +726,7 @@ function addZoneOverlay(z) {
   if (overlayLayers[label]) return;
   const wms = L.tileLayer.wms('https://api.vworld.kr/req/wms', Object.assign({
     layers: z.id.toLowerCase(), styles: z.id.toLowerCase(), format: 'image/png', transparent: true,
-    version: '1.3.0', key, opacity: z.level === 0 ? 0.45 : 0.55, maxZoom: 19,
+    version: '1.3.0', key, opacity: z.level === 0 ? 0.45 : 0.55, maxZoom: 20,
     tileSize: 512,            // 큰 칸으로 받아 요청 수를 1/4로 줄임
     updateWhenZooming: false, // 확대·축소 중간 단계는 받지 않음
     keepBuffer: 1
@@ -1565,9 +1565,25 @@ function followTo(latlng, dur, zWant) {
 /* 속도에 맞춘 자동 축척 (내비처럼): 느리면 크게, 빠르면 넓게. 지도 그림이 선명하도록 정수 단계만 사용.
    화면 깜빡임 방지: 최근 3번 속도의 평균으로 판단 · 빨라질 땐 2초, 느려질 땐 5초 이어져야 바꿈 · 한 번 바꾸면 8초는 유지 ·
    경계보다 15% 이상 느려져야 확대. 손으로 확대·축소하면 30초 동안 멈춤 */
-const AUTO_ZOOM = [[7, 18], [25, 17], [50, 16], [90, 15], [Infinity, 14]]; // [이 속도(km/h) 미만, 줌]
+const AUTO_ZOOM = [[5, 20], [25, 19], [50, 18], [80, 17], [100, 16], [Infinity, 15]]; // [이 속도(km/h) 미만, 줌] — 20은 19 그림을 2배 확대
 let trackKmh = null, autoZ = null, zCand = null, zCandAt = 0, zChangedAt = 0, manualZoomAt = 0, appZoomUntil = 0, kmhHist = [];
-function bandZoom(kmh) { for (const [lim, z] of AUTO_ZOOM) if (kmh < lim) return z; }
+// 화면 크기 보정: 위 단계는 '세로 스마트폰'(보이는 지도 폭 약 412px) 기준.
+// 실제로 보이는 지도(검색창·접힌 결과창을 뺀 영역)의 짧은 변이 2배면 +1단계(더 확대), 절반이면 −1단계 —
+// 그래서 어떤 화면이든 같은 속도에서 비슷한 거리(주변 범위)가 보임
+const AZ_REF_PX = 412;
+function zoomFit() {
+  const sz = map.getSize(), sb = $('.searchbar'), sf = $('#searchForm');
+  const top = sb && sf ? sb.offsetTop + sf.offsetHeight : 56;
+  const px = Math.max(120, Math.min(sz.x, sz.y - top - 96)); // 96 = 접힌 결과창 높이
+  return { px: Math.round(px), off: Math.max(-2, Math.min(2, Math.round(Math.log2(px / AZ_REF_PX)))) };
+}
+let zFitCache = null, zFitAt = 0;
+function zoomOff() { if (!zFitCache || Date.now() - zFitAt > 3000) { zFitCache = zoomFit(); zFitAt = Date.now(); } return zFitCache.off; }
+window.addEventListener('resize', () => { // 화면을 돌리면 다시 계산하고, 단계가 바뀌면 바로 적용
+  const old = zFitCache ? zFitCache.off : null; zFitCache = null;
+  setTimeout(() => { if (old != null && zoomOff() !== old) autoZ = null; }, 300);
+});
+function bandZoom(kmh) { for (const [lim, z] of AUTO_ZOOM) if (kmh < lim) return Math.max(10, Math.min(20, z + zoomOff())); }
 function autoZoomTarget() {
   if (trackKmh == null || Date.now() - manualZoomAt < 30000) return null; // null = 지금 축척 유지
   let want = bandZoom(trackKmh);
@@ -1602,7 +1618,10 @@ function onTrackPos(p) {
   const dur = Math.max(0.25, Math.min(1.5, gap * 0.95)); // 위치가 오는 간격에 맞춰 이동 시간을 정함
   const jump = meMarker && distM([meMarker.getLatLng().lat, meMarker.getLatLng().lng], [lat, lon]) > 2000; // 순간이동급이면 애니메이션 없이
   // 제자리(화면에서 3픽셀 미만 이동)면 점도 지도도 움직이지 않음 — 서 있을 때 GPS가 1~2m씩 흔들려 화면이 쉬지 않고 다시 그려지던 것 방지
-  const still = !!meMarker && !jump && map.latLngToContainerPoint(meMarker.getLatLng()).distanceTo(map.latLngToContainerPoint([lat, lon])) < 3;
+  const moveM = meMarker ? distM([meMarker.getLatLng().lat, meMarker.getLatLng().lng], [lat, lon]) : Infinity;
+  const slow = p.coords.speed == null || isNaN(p.coords.speed) || p.coords.speed < 1;
+  const still = !!meMarker && !jump && (map.latLngToContainerPoint(meMarker.getLatLng()).distanceTo(map.latLngToContainerPoint([lat, lon])) < 3
+    || (slow && moveM < Math.min(8, Math.max(2.5, (accuracy || 5) * 0.5)))); // 크게 확대하면 GPS 1~2m 흔들림도 여러 픽셀이라 거리로도 판단
   if (still) { if (meCircle.getRadius() !== accuracy) meCircle.setRadius(accuracy); }
   else if (jump || !meMarker || paused) showMe(lat, lon, accuracy); else animateMe(lat, lon, accuracy, dur);
   lastPos = [lat, lon];
@@ -2447,6 +2466,8 @@ $('#btnDiagCopy').addEventListener('click', async () => {
 /* ───────── 앱 정보 창 (상단 버전 배지를 누르면) ─────────
    버전·업데이트 확인 / 데이터 상태 / 최근 바뀐 점 / 강제 새로고침·상태 복사·앱 설치·자세히 진단 */
 const CHANGELOG = [
+  ['v1.75', '자동 축척 단계 변경: 5km/h 미만 20 · ~25 19 · ~50 18 · ~80 17 · ~100 16 · 그 이상 15 (지도 최대 20레벨)'],
+  ['v1.74', '실시간 추적 자동 축척을 화면 크기에 맞춤 (가로·세로 폰, 태블릿, 차량용 화면)'],
   ['v1.73', '다른 앱에 갔다 돌아오면 결과창이 하얗게 비어 보이던 문제 수정'],
   ['v1.72', '지점 좌표를 위경도·도분초 두 가지로 표시 · 누르면 복사'],
   ['v1.71', '실시간 추적 화면이 하얗게 깜빡이던 문제 개선 (화면 밖 고시보는 그리지 않음 · 제자리에선 지도 고정 · 내 위치 점을 따로 그림)'],
@@ -2516,6 +2537,7 @@ async function openVer() {
     else loc = ['확인 불가', ''];
     if (lp && geoNative) loc[0] += ' · 앱이 GPS에서 직접 받는 중';
     d.push(['📍', '위치 권한', loc[0], loc[1]]);
+    { const f = zoomFit(); d.push(['🔍', '자동 축척 화면 보정', `${f.off > 0 ? '+' : ''}${f.off}단계 (보이는 지도 ${f.px}px · ${innerWidth}×${innerHeight})`, '']); }
     h += `<div class="ver-sec">데이터 상태</div>` + d.map(x => row(...x)).join('');
     lines.push(...d.map(x => `${x[1]}: ${x[2].replace(/<[^>]+>/g, '')}`));
     // ③ 바뀐 점
@@ -2576,5 +2598,5 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
 }
 
 // 테스트용 노출
-window.__dz = { startTrack, stopTrack, get tracking() { return trackId != null; }, runDiag, sunTimesKST, nationalGet, containsPoint, distToBoundary, makeVerdict, ZONES, hiddenZones, overlayZone, drawZones, notamStatus, scheduleText, scheduleState, kstDayWindows, get notamData() { return notamData; } };
+window.__dz = { startTrack, stopTrack, zoomFit, get tracking() { return trackId != null; }, runDiag, sunTimesKST, nationalGet, containsPoint, distToBoundary, makeVerdict, ZONES, hiddenZones, overlayZone, drawZones, notamStatus, scheduleText, scheduleState, kstDayWindows, get notamData() { return notamData; } };
 })();
