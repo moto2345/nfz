@@ -409,3 +409,7 @@ a.tel{color:var(--primary);text-decoration:none;border-bottom:1px solid rgba(21,
 .tide-tbl .tx.hi{color:#1565c0} .tide-tbl .tx.lo{color:#00897b} .tide-tbl .tx small{color:var(--muted)}
 .tide-tbl .tx.past{opacity:.45}
 .tide-note{margin-top:8px;line-height:1.5}
+/* 터널 추정 이동 */
+.nav-hud .hud-dr{background:#eceff1;margin:2px -5px;padding:1px 5px;border-radius:5px}
+.nav-hud .hud-dr span,.nav-hud .hud-dr b{color:#455a64;font-weight:800}
+.nav-hud b#hudSpd.dr{color:#607d8b;font-style:italic}

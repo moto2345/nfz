@@ -1457,7 +1457,7 @@ function updateHud(c, t) {
   prevFix = { lat: c.latitude, lon: c.longitude, t };
   if (spd != null && !isNaN(spd)) { kmhHist.push(spd * 3.6); if (kmhHist.length > 3) kmhHist.shift(); trackKmh = kmhHist.reduce((a, b) => a + b, 0) / kmhHist.length; } // 튀는 값 완화
   gpsHeading = spd != null && spd > 1 && c.heading != null && !isNaN(c.heading) ? c.heading : null; // 걷는 속도 이상일 때만 진행 방향 사용
-  $('#hudSpd').textContent = spd == null || isNaN(spd) ? '-' : `${(spd * 3.6).toFixed(spd * 3.6 < 10 ? 1 : 0)} km/h`;
+  $('#hudSpd').textContent = spd == null || isNaN(spd) ? '-' : `${(spd * 3.6).toFixed(1)} km/h`;
   setSpdQuality();
   gpsAlt = c.altitude == null || isNaN(c.altitude) ? null : c.altitude;
   lastPos = [c.latitude, c.longitude];
@@ -1570,7 +1570,7 @@ function renderHudExtra() {
 let spdAccMs = null, spdAccAt = 0;
 function setSpdQuality() {
   const el = $('#hudSpd'); if (!el) return;
-  if (el.classList.contains('stale')) return;
+  if (el.classList.contains('stale') || DR.on) return;
   const fresh = spdAccMs != null && Date.now() - spdAccAt < 5000;
   el.className = !fresh ? '' : spdAccMs * 3.6 <= 2 ? 'q-good' : spdAccMs * 3.6 <= 5 ? 'q-mid' : 'q-bad';
   el.title = fresh ? `속도 오차 ±${(spdAccMs * 3.6).toFixed(1)} km/h` : '';
@@ -1584,8 +1584,9 @@ function gpsWatchdog(on) {
   gpsWatch = setInterval(() => {
     if (!lastFixAt) return; // 첫 위치를 찾는 중
     const gap = Math.round((Date.now() - lastFixAt) / 1000), lost = gap >= 5;
+    drWatch((Date.now() - lastFixAt) / 1000);
     $('#hudLostRow').classList.toggle('hidden', !lost);
-    $('#hudSpd').classList.toggle('stale', lost);
+    $('#hudSpd').classList.toggle('stale', lost && !DR.on);
     if (lost) $('#hudLost').textContent = gap < 60 ? `${gap}초` : `${Math.floor(gap / 60)}분 ${gap % 60}초`;
     else setSpdQuality();
   }, 1000);
@@ -1723,8 +1724,232 @@ document.addEventListener('click', e => {
 // 차량용 안드로이드처럼 그래픽이 약한 기기에서 지도가 계속 움직이면 새 창을 못 그려 하얗게 멈추는 문제 방지
 const anyModalOpen = () => !!document.querySelector('.modal:not(.hidden)');
 const mapPaused = () => anyModalOpen() || !$('#tab-map').classList.contains('active');
+/* ───────── 터널 추정 이동 (추측 항법 · Dead Reckoning) ─────────
+   내비게이션 앱처럼 GPS가 끊겨도(터널·지하차도) 점이 멈추지 않게:
+   ① 주행 중 주변 터널 도로 모양을 미리 받아 둠 (OpenStreetMap, 3km 반경 · 터널만이라 데이터가 작음)
+   ② 끊기면 마지막 위치·진행 방향으로 들어선 터널 도로를 찾아 그 선을 따라 이동 (맵 매칭)
+   ③ 이동 속도 = 끊기기 직전 속도. 가속도계가 '차의 앞 방향'을 미리 학습했으면 가감속을 반영
+      (휴대폰을 거치대에 고정했을 때만 의미 있음 · 학습이 안 됐거나 폰 자세가 바뀌면 일정 속도)
+   ④ GPS가 다시 잡히면 바로 실제 위치로. 추정 중에는 점을 회색으로, 오차 원을 점점 크게, 공역 판정은 하지 않음 */
+const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
+const DR = { on: false, path: null, s: 0, v: 0, v0: 0, t: 0, startAt: 0, timer: null, name: '', tunLen: 0, imu: false, done: false, P: null, hdg: null, fetching: false };
+let tun = { c: null, at: 0, ways: [], busy: false };
+let lastGood = null, goodHist = []; // 정확한 마지막 위치들 (진행 방향 계산용)
+const bearingOf = (a, b) => { const d = toLocal(b[1], b[0], a[0], a[1]); return (Math.atan2(d[0], d[1]) * 180 / Math.PI + 360) % 360; };
+const angDiff = (a, b) => Math.abs(((a - b) % 360 + 540) % 360 - 180);
+async function fetchTunnels(lat, lon) {
+  if (tun.busy) return;
+  tun.busy = true;
+  const q = `[out:json][timeout:15];way(around:3000,${lat.toFixed(5)},${lon.toFixed(5)})[highway~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|motorway_link|trunk_link|primary_link|secondary_link|tertiary_link)$"][tunnel][tunnel!=no];out body geom qt;`;
+  try {
+    for (const ep of OVERPASS) {
+      try {
+        const r = await fetchT(ep, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }, 15000);
+        if (!r.ok) continue;
+        const j = await r.json();
+        const ways = (j.elements || []).filter(e => e.type === 'way' && e.geometry && e.geometry.length > 1).map(e => {
+          const t = e.tags || {}, ow = t.oneway === '-1' ? -1 : (t.oneway === 'yes' || t.oneway === '1' || t.oneway === 'true' || /^motorway/.test(t.highway) || t.junction === 'roundabout') ? 1 : 0;
+          return { id: e.id, nodes: e.nodes || [], pts: e.geometry.map(g => [g.lat, g.lon]), ow, name: t.name || t['tunnel:name'] || t.ref || '' };
+        });
+        tun = { c: [lat, lon], at: Date.now(), ways, busy: false };
+        return true;
+      } catch (e) {}
+    }
+  } finally { tun.busy = false; }
+  tun.c = [lat, lon]; tun.at = Date.now(); // 실패해도 같은 곳에서 계속 다시 묻지 않게
+  return false;
+}
+function maybePrefetchTunnels(lat, lon) {
+  if (trackKmh == null || trackKmh < 25) return; // 차로 달릴 때만
+  if (tun.c && distM(tun.c, [lat, lon]) < 1500 && Date.now() - tun.at < 20 * 60e3) return;
+  fetchTunnels(lat, lon);
+}
+// 경로(점 목록) → 누적 거리 포함
+function mkPath(pts) {
+  const out = [{ lat: pts[0][0], lon: pts[0][1], cum: 0 }];
+  for (let i = 1; i < pts.length; i++) { const d = distM(pts[i - 1], pts[i]); if (d < 0.5) continue; out.push({ lat: pts[i][0], lon: pts[i][1], cum: out[out.length - 1].cum + d }); }
+  return out;
+}
+function pathAt(path, s) {
+  if (s >= path[path.length - 1].cum - 0.5 && path.length > 1) { const a = path[path.length - 2], e = path[path.length - 1]; return { ll: [e.lat, e.lon], hdg: bearingOf([a.lat, a.lon], [e.lat, e.lon]), end: true }; }
+  if (s <= 0) return { ll: [path[0].lat, path[0].lon], hdg: path.length > 1 ? bearingOf([path[0].lat, path[0].lon], [path[1].lat, path[1].lon]) : null };
+  for (let i = 1; i < path.length; i++) if (path[i].cum >= s) {
+    const a = path[i - 1], b = path[i], k = (s - a.cum) / (b.cum - a.cum);
+    return { ll: [a.lat + (b.lat - a.lat) * k, a.lon + (b.lon - a.lon) * k], hdg: bearingOf([a.lat, a.lon], [b.lat, b.lon]) };
+  }
+  const a = path[path.length - 2] || path[0], b = path[path.length - 1];
+  return { ll: [b.lat, b.lon], hdg: bearingOf([a.lat, a.lon], [b.lat, b.lon]), end: true };
+}
+// 마지막 위치·방향으로 들어선 터널 도로를 찾아 따라갈 경로를 만듦
+function drMatch(P, hdg) {
+  let best = null;
+  for (const w of tun.ways) for (const dir of (w.ow === 1 ? [1] : w.ow === -1 ? [-1] : [1, -1])) {
+    const pts = dir === 1 ? w.pts : w.pts.slice().reverse(), nodes = dir === 1 ? w.nodes : w.nodes.slice().reverse();
+    // (가) 이미 터널 도로 위 — 선분에 수선을 내려 가까운 곳
+    for (let i = 0; i < pts.length - 1; i++) {
+      const A = toLocal(pts[i][1], pts[i][0], P[0], P[1]), B = toLocal(pts[i + 1][1], pts[i + 1][0], P[0], P[1]);
+      const dx = B[0] - A[0], dy = B[1] - A[1], L2 = dx * dx + dy * dy; if (!L2) continue;
+      const k = Math.max(0, Math.min(1, -(A[0] * dx + A[1] * dy) / L2)), qx = A[0] + dx * k, qy = A[1] + dy * k, d = Math.hypot(qx, qy);
+      const da = angDiff(bearingOf(pts[i], pts[i + 1]), hdg);
+      if (d <= 60 && da <= 40) { const sc = d + da * 2; if (!best || sc < best.sc) best = { sc, w, nodes, pts, i, q: [P[0] + qy / 110574, P[1] + qx / (Math.cos(P[0] * Math.PI / 180) * 111320)] }; }
+    }
+    // (나) 터널 입구가 앞쪽 400m 안에 있음
+    const dE = distM(P, pts[0]);
+    if (dE > 5 && dE <= 400 && angDiff(bearingOf(P, pts[0]), hdg) <= 25 && angDiff(bearingOf(pts[0], pts[1]), hdg) <= 35) {
+      const sc = dE * 0.4 + angDiff(bearingOf(pts[0], pts[1]), hdg) * 2 + 10;
+      if (!best || sc < best.sc) best = { sc, w, nodes, pts, i: -1, q: null };
+    }
+  }
+  if (!best) return null;
+  let pts = [P].concat(best.i >= 0 ? [best.q].concat(best.pts.slice(best.i + 1)) : best.pts);
+  let name = best.w.name, used = new Set([best.w.id]), endNode = best.nodes[best.nodes.length - 1], lastHdg = bearingOf(pts[pts.length - 2], pts[pts.length - 1]);
+  for (let n = 0; n < 12; n++) { // 같은 끝점으로 이어지는 다음 터널 구간 (긴 터널은 여러 조각)
+    let nx = null;
+    for (const w of tun.ways) if (!used.has(w.id)) for (const dir of (w.ow === 1 ? [1] : w.ow === -1 ? [-1] : [1, -1])) {
+      const ns = dir === 1 ? w.nodes : w.nodes.slice().reverse(), ps = dir === 1 ? w.pts : w.pts.slice().reverse();
+      if (ns[0] !== endNode) continue;
+      const da = angDiff(bearingOf(ps[0], ps[1]), lastHdg);
+      if (da <= 45 && (!nx || da < nx.da)) nx = { w, ns, ps, da };
+    }
+    if (!nx) break;
+    used.add(nx.w.id); pts = pts.concat(nx.ps.slice(1)); endNode = nx.ns[nx.ns.length - 1];
+    lastHdg = bearingOf(pts[pts.length - 2], pts[pts.length - 1]); if (!name) name = nx.w.name;
+  }
+  const tunLen = mkPath(pts).slice(-1)[0].cum;
+  // 출구 뒤로 400m 직진 연장 (출구를 나와 GPS가 다시 잡힐 때까지)
+  const last = pts[pts.length - 1], rad = lastHdg * Math.PI / 180;
+  pts.push([last[0] + 400 * Math.cos(rad) / 110574, last[1] + 400 * Math.sin(rad) / (Math.cos(last[0] * Math.PI / 180) * 111320)]);
+  return { path: mkPath(pts), name, tunLen };
+}
+function drStraight(P, hdg, v) { // 터널 도로를 못 찾으면 진행 방향 직진 (짧은 지하차도 등) — 최대 30초·800m
+  const L = Math.min(800, v * 30), rad = hdg * Math.PI / 180;
+  return { path: mkPath([P, [P[0] + L * Math.cos(rad) / 110574, P[1] + L * Math.sin(rad) / (Math.cos(P[0] * Math.PI / 180) * 111320)]]), name: '', tunLen: 0 };
+}
+/* 가속도계: GPS가 잡히는 동안 'GPS 속도 변화'와 '폰이 느낀 가속도'를 비교해 차의 앞 방향(폰 기준)을 학습 */
+const IMU = { acc: [0, 0, 0], n: 0, grav: null, g0: null, sx: 0, sxx: 0, sm: [0, 0, 0], smx: [0, 0, 0], w: 0, prevV: null, prevT: 0, on: false };
+function onMotion(e) {
+  let a = e.acceleration, x, y, z;
+  const g = e.accelerationIncludingGravity;
+  if (g && g.x != null) { const gv = [g.x, g.y, g.z]; IMU.grav = IMU.grav ? IMU.grav.map((v, i) => v + (gv[i] - v) * 0.02) : gv; }
+  if (a && a.x != null) { x = a.x; y = a.y; z = a.z; }
+  else if (g && g.x != null && IMU.grav) { x = g.x - IMU.grav[0]; y = g.y - IMU.grav[1]; z = g.z - IMU.grav[2]; }
+  else return;
+  if (!isFinite(x + y + z)) return;
+  IMU.acc[0] += x; IMU.acc[1] += y; IMU.acc[2] += z; IMU.n++;
+}
+function imuTake() { if (!IMU.n) return null; const m = IMU.acc.map(v => v / IMU.n); IMU.acc = [0, 0, 0]; IMU.n = 0; return m; }
+async function imuOn(on) {
+  if (on && !IMU.on) {
+    try { if (window.DeviceMotionEvent && typeof DeviceMotionEvent.requestPermission === 'function' && (await DeviceMotionEvent.requestPermission()) !== 'granted') return; } catch (e) { return; }
+    window.addEventListener('devicemotion', onMotion); IMU.on = true;
+  } else if (!on && IMU.on) { window.removeEventListener('devicemotion', onMotion); IMU.on = false; }
+  Object.assign(IMU, { acc: [0, 0, 0], n: 0, sx: 0, sxx: 0, sm: [0, 0, 0], smx: [0, 0, 0], w: 0, prevV: null, prevT: 0, g0: null });
+}
+function imuLearn(spd, t) { // GPS 위치가 올 때마다
+  const m = imuTake();
+  if (spd == null || isNaN(spd) || !m) { IMU.prevV = null; return; }
+  if (IMU.prevV != null) {
+    const dt = (t - IMU.prevT) / 1000;
+    if (dt >= 0.5 && dt <= 3) {
+      const ag = (spd - IMU.prevV) / dt, lam = Math.exp(-dt / 180); // 3분 정도의 기억 (폰을 옮기면 다시 배움)
+      IMU.sx = IMU.sx * lam + ag; IMU.sxx = IMU.sxx * lam + ag * ag; IMU.w = IMU.w * lam + 1;
+      for (let i = 0; i < 3; i++) { IMU.sm[i] = IMU.sm[i] * lam + m[i]; IMU.smx[i] = IMU.smx[i] * lam + m[i] * ag; }
+      if (IMU.grav) IMU.g0 = IMU.grav.slice();
+    }
+  }
+  IMU.prevV = spd; IMU.prevT = t;
+}
+function imuModel() { // m = f·a + b  → 앞 방향 f, 치우침 b
+  const varx = IMU.sxx - IMU.sx * IMU.sx / (IMU.w || 1);
+  if (IMU.w < 15 || varx < 1.5) return null; // 가감속 경험이 부족하면 쓰지 않음
+  const f = IMU.smx.map((v, i) => (v - IMU.sm[i] * IMU.sx / IMU.w) / varx), b = IMU.sm.map((v, i) => (v - f[i] * IMU.sx) / IMU.w);
+  const fl = Math.hypot(...f);
+  if (fl < 0.4 || fl > 2.5) return null; // 방향을 제대로 못 잡음
+  return { f, b, f2: fl * fl };
+}
+function imuPoseSame() { // 학습 때와 폰 자세(중력 방향)가 비슷한지
+  if (!IMU.g0 || !IMU.grav) return false;
+  const a = IMU.g0, b = IMU.grav, c = (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / (Math.hypot(...a) * Math.hypot(...b));
+  return c > Math.cos(20 * Math.PI / 180);
+}
+function drWatch(gapS) {
+  if (DR.on) return;
+  if (DR.done || gapS < 3 || !lastGood || trackKmh == null || trackKmh < 15 || !trackId) return;
+  if (Date.now() - lastGood.at > 20e3) return; // 이미 오래 끊긴 뒤면 시작 안 함
+  drStart();
+}
+function drStart() {
+  const P = [lastGood.lat, lastGood.lon];
+  let hdg = lastGood.hdg;
+  if (hdg == null) { const o = goodHist.find(h => distM([h.lat, h.lon], P) > 25); if (o) hdg = bearingOf([o.lat, o.lon], P); }
+  if (hdg == null) return; // 방향을 모르면 추정하지 않음
+  const v0 = trackKmh / 3.6;
+  Object.assign(DR, { on: true, done: true, P, hdg, v0, v: v0, t: Date.now(), startAt: lastGood.at, imu: !!imuModel() && imuPoseSame() });
+  DR.s = v0 * (Date.now() - lastGood.at) / 1000; // 끊긴 뒤 지난 시간만큼 이미 갔다고 봄
+  drSetPath();
+  imuTake(); // 끊기기 전 값은 버림
+  if ((!tun.c || distM(tun.c, P) > 2000 || !tun.ways.length) && !DR.fetching) { // 미리 받은 게 없으면 지금이라도 (터널에서 LTE가 되면)
+    DR.fetching = true;
+    fetchTunnels(P[0], P[1]).then(ok => { DR.fetching = false; if (ok && DR.on && !DR.name && !DR.tunLen) drSetPath(); });
+  }
+  if (meMarker) meMarker.setStyle({ fillColor: '#90a4ae', color: '#fff' });
+  $('#hudDrRow').classList.remove('hidden');
+  DR.timer = setInterval(drTick, 500);
+  drTick();
+}
+function drSetPath() {
+  const m = drMatch(DR.P, DR.hdg) || drStraight(DR.P, DR.hdg, DR.v0);
+  DR.path = m.path; DR.name = m.name; DR.tunLen = m.tunLen;
+  $('#hudDrLab').textContent = m.tunLen ? '🚇 터널 추정' : '➡ 직진 추정';
+}
+function drTick() {
+  if (!DR.on) return;
+  const now = Date.now(), dt = (now - DR.t) / 1000; DR.t = now;
+  // 속도: 가속도계 반영 (가능할 때) · 아니면 끊기기 전 속도 그대로
+  const mod = DR.imu && imuPoseSame() ? imuModel() : null, m = imuTake();
+  if (mod && m) {
+    let a = ((m[0] - mod.b[0]) * mod.f[0] + (m[1] - mod.b[1]) * mod.f[1] + (m[2] - mod.b[2]) * mod.f[2]) / mod.f2;
+    a = Math.max(-5, Math.min(4, a));
+    DR.v = Math.max(0, Math.min(DR.v0 * 1.5 + 5, DR.v + a * dt));
+    if (DR.v < 0.8) DR.v = 0;
+  } else DR.v = DR.v0;
+  const elapsed = (now - DR.startAt) / 1000, total = DR.path[DR.path.length - 1].cum;
+  const maxT = DR.tunLen ? 300 : 30; // 터널은 최대 5분, 직진 추정은 30초
+  if (elapsed <= maxT) DR.s = Math.min(total, DR.s + DR.v * dt);
+  const at = pathAt(DR.path, DR.s), acc = Math.min(400, 15 + DR.s * 0.04);
+  gpsHeading = at.hdg;
+  const paused = mapPaused();
+  if (!meMarker || paused) showMe(at.ll[0], at.ll[1], acc); else animateMe(at.ll[0], at.ll[1], acc, 0.5);
+  if (meMarker) meMarker.setStyle({ fillColor: '#90a4ae' });
+  lastPos = at.ll;
+  renderHeading();
+  if (trackFollow && !paused) followTo(at.ll, 0.5, null);
+  $('#hudSpd').textContent = `~${(DR.v * 3.6).toFixed(1)} km/h`; $('#hudSpd').className = 'dr';
+  const left = DR.tunLen ? Math.max(0, DR.tunLen - DR.s) : null;
+  $('#hudDr').textContent = elapsed > maxT || at.end ? 'GPS 기다리는 중'
+    : (DR.name ? DR.name.slice(0, 10) + ' · ' : '') + (left != null ? (left > 0 ? `출구까지 ${left >= 1000 ? (left / 1000).toFixed(1) + 'km' : Math.round(left / 10) * 10 + 'm'}` : '출구 지남') : `${Math.round(DR.s)}m`) + (mod ? ' · 가속도계' : '');
+}
+function drStop() {
+  if (!DR.on) return;
+  clearInterval(DR.timer); DR.timer = null; DR.on = false;
+  $('#hudDrRow').classList.add('hidden'); $('#hudSpd').className = '';
+  if (meMarker) meMarker.setStyle({ fillColor: '#1e88e5' });
+}
+
 function onTrackPos(p) {
   const { latitude: lat, longitude: lon, accuracy } = p.coords;
+  // 터널 추정 중: 다시 따라가기 버튼(가짜 위치)은 무시, 오차가 큰 위치(기지국 위치 등)는 무시하고 계속 추정
+  if (DR.on && p.synthetic) return;
+  if (!p.synthetic && accuracy > 60 && lastGood && trackKmh != null && trackKmh >= 15 && Date.now() - lastGood.at < 120e3) return;
+  if (DR.on) drStop();
+  if (!p.synthetic && accuracy <= 60) {
+    const sp = p.coords.speed;
+    lastGood = { lat, lon, at: Date.now(), hdg: sp != null && sp > 3 && p.coords.heading != null && !isNaN(p.coords.heading) ? p.coords.heading : null };
+    goodHist.unshift({ lat, lon, at: Date.now() }); goodHist = goodHist.filter(h => Date.now() - h.at < 15e3).slice(0, 20);
+    DR.done = false; // 다음 끊김에서 다시 추정할 수 있게
+    imuLearn(sp, Date.now());
+    maybePrefetchTunnels(lat, lon);
+  }
   const now = Date.now(), gap = lastFixAt ? (now - lastFixAt) / 1000 : 1;
   lastFixAt = now;
   const paused = mapPaused();
@@ -1772,6 +1997,8 @@ function startTrack() {
   }, { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }); // 저장된 옛 위치 말고 늘 새 위치
   keepAwake(true);
   compass(true); // 버튼을 누른 순간에 켜야 아이폰에서 권한을 물을 수 있음
+  imuOn(true); // 터널 추정용 가속도계 (같은 이유로 여기서)
+  drStop(); DR.done = false; lastGood = null; goodHist = [];
   gpsHeading = null; prevFix = null; lastFixAt = 0;
   trackKmh = null; autoZ = null; zCand = null; manualZoomAt = 0; kmhHist = []; zChangedAt = 0; lastPos = null; hudWxTry = Date.now() - 50e3;
   ['hudSun', 'hudWind', 'hudWindUp', 'hudTemp', 'hudZone'].forEach(id => $('#' + id + 'Row').classList.add('hidden'));
@@ -1783,6 +2010,7 @@ function startTrack() {
 }
 function stopTrack(quiet) {
   if (trackId != null) geoClear(trackId);
+  drStop(); imuOn(false);
   trackId = null; keepAwake(false); compass(false); gpsHeading = null;
   $('#navHud').classList.add('hidden');
   satPoll(false);
@@ -1794,7 +2022,7 @@ function stopTrack(quiet) {
 }
 $('#btnTrack').addEventListener('click', () => {
   if (trackId == null) startTrack();
-  else if (!trackFollow) { trackFollow = true; trackLast = null; trackAt = 0; manualZoomAt = 0; trackUI(); if (meMarker) { const q = meMarker.getLatLng(); setViewVisible([q.lat, q.lng], map.getZoom()); onTrackPos({ coords: { latitude: q.lat, longitude: q.lng, accuracy: meCircle ? meCircle.getRadius() : 30 } }); } }
+  else if (!trackFollow) { trackFollow = true; trackLast = null; trackAt = 0; manualZoomAt = 0; trackUI(); if (meMarker) { const q = meMarker.getLatLng(); setViewVisible([q.lat, q.lng], map.getZoom()); if (!DR.on) onTrackPos({ synthetic: true, coords: { latitude: q.lat, longitude: q.lng, accuracy: meCircle ? meCircle.getRadius() : 30 } }); } }
   else stopTrack();
 });
 // 지도를 손으로 옮기거나 다른 지점을 누르면 따라가기·자동 판정을 잠시 멈춤 (추적 버튼을 누르면 다시)
@@ -2579,6 +2807,7 @@ $('#btnDiagCopy').addEventListener('click', async () => {
 /* ───────── 앱 정보 창 (상단 버전 배지를 누르면) ─────────
    버전·업데이트 확인 / 데이터 상태 / 최근 바뀐 점 / 강제 새로고침·상태 복사·앱 설치·자세히 진단 */
 const CHANGELOG = [
+  ['v1.77', '터널·지하차도에서 GPS가 끊겨도 터널 도로를 따라 추정 이동 (가속도계 보정) · 속도 소수점 한 자리'],
   ['v1.76', '상단 🌊 물때 버튼 — 만조·간조 시각, 밀물·썰물 흐름 그래프, 사리·조금 (4일)'],
   ['v1.75', '자동 축척 단계 변경: 5km/h 미만 20 · ~25 19 · ~50 18 · ~80 17 · ~100 16 · 그 이상 15 (지도 최대 20레벨)'],
   ['v1.74', '실시간 추적 자동 축척을 화면 크기에 맞춤 (가로·세로 폰, 태블릿, 차량용 화면)'],
@@ -2712,5 +2941,5 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
 }
 
 // 테스트용 노출
-window.__dz = { startTrack, stopTrack, zoomFit, tideExtremes, tidePhase, get tracking() { return trackId != null; }, runDiag, sunTimesKST, nationalGet, containsPoint, distToBoundary, makeVerdict, ZONES, hiddenZones, overlayZone, drawZones, notamStatus, scheduleText, scheduleState, kstDayWindows, get notamData() { return notamData; } };
+window.__dz = { DR, IMU, get tun() { return tun; }, startTrack, stopTrack, zoomFit, tideExtremes, tidePhase, get tracking() { return trackId != null; }, runDiag, sunTimesKST, nationalGet, containsPoint, distToBoundary, makeVerdict, ZONES, hiddenZones, overlayZone, drawZones, notamStatus, scheduleText, scheduleState, kstDayWindows, get notamData() { return notamData; } };
 })();

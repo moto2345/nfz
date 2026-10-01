@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="하코 NFZ">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-  <link rel="stylesheet" href="style.css?v=76">
+  <link rel="stylesheet" href="style.css?v=77">
 </head>
 <body>
 
@@ -20,7 +20,7 @@
 <header class="appbar">
   <img src="icons/icon-192.png" alt="" class="appbar-logo">
   <h1>하코 NFZ 조회</h1>
-  <button id="btnVer" class="badge" type="button" aria-label="앱 정보">v1.76</button>
+  <button id="btnVer" class="badge" type="button" aria-label="앱 정보">v1.77</button>
   <button id="btnWx" class="wx-btn" type="button" aria-label="현재 날씨" title="현재 날씨"><span class="wxb-ico">🌤</span><span class="wxb-txt">현재날씨</span></button>
   <button id="btnTide" class="wx-btn tide-btn" type="button" aria-label="물때 (밀물·썰물)" title="물때 (밀물·썰물)"><span class="wxb-ico">🌊</span><span class="wxb-txt">물때</span></button>
   <button id="btnNotam" class="appbar-btn notam hidden" type="button" aria-label="항공고시보" title="드론 관련 항공고시보">
@@ -49,6 +49,7 @@
     <div class="hud-dir"><svg id="hudArrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 19 20l-7-4-7 4z" fill="currentColor"/></svg><b id="hudDir">-</b></div>
     <button id="btnCompassHelp" class="hud-help" type="button">🧭 방향이 이상하면 보정</button>
     <div id="hudLostRow" class="hud-lost hidden"><span>📡 GPS 끊김</span><b id="hudLost">-</b></div>
+    <div id="hudDrRow" class="hud-dr hidden"><span id="hudDrLab">🚇 추정 이동</span><b id="hudDr">-</b></div>
     <div><span>속도</span><b id="hudSpd">-</b></div>
     <div><span>고도<small id="hudAltSrc"></small></span><b id="hudAlt">-</b></div>
     <div><span>GPS 오차</span><b id="hudAcc">-</b></div>
@@ -362,7 +363,7 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="config.js?v=76"></script>
-<script src="app.js?v=76"></script>
+<script src="config.js?v=77"></script>
+<script src="app.js?v=77"></script>
 </body>
 </html>
