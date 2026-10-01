@@ -760,12 +760,48 @@ let lastResult = null;
 map.on('click', e => { pauseTrackFollow(); checkAt(e.latlng.lat, e.latlng.lng); });
 map.on('moveend', () => { const c = map.getCenter(); LS.set('mapView', { lat: c.lat, lng: c.lng, z: map.getZoom() }); });
 
+/* ───────── 화면 배율 (글자·버튼·창 크기) ─────────
+   지도 그림은 그대로 선명하게 두고, 그 위의 버튼·글자·결과창·창들만 키우거나 줄임 (CSS zoom).
+   CSS zoom이 표준대로 동작하는 브라우저(크롬·삼성인터넷·앱 화면엔진 128 이상, 파이어폭스 126 이상)에서만 켬 */
+const UIZ_STEPS = [0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6];
+const UIZ_OK = (() => { const ua = navigator.userAgent, c = ua.match(/Chrom(?:e|ium)\/(\d+)/), f = ua.match(/Firefox\/(\d+)/);
+  return !!(c ? +c[1] >= 128 : f ? +f[1] >= 126 : false) && CSS.supports('zoom', '1.2'); })();
+let UI_Z = 1;
+function applyUiZoom(z, quiet) {
+  UI_Z = UIZ_OK ? z : 1;
+  document.documentElement.style.setProperty('--ui', UI_Z);
+  LS.set('uiZoom', UI_Z);
+  const v = $('#uizVal'); if (v) v.textContent = Math.round(UI_Z * 100) + '%';
+  $('#uizMinus').disabled = UI_Z <= UIZ_STEPS[0]; $('#uizPlus').disabled = UI_Z >= UIZ_STEPS[UIZ_STEPS.length - 1];
+  if (typeof zFitCache !== 'undefined') zFitCache = null;
+  requestAnimationFrame(() => { try { map.invalidateSize(false); } catch (e) {} if (typeof setSheetHeight === 'function') setSheetHeight(); });
+  if (!quiet) toast(`화면 배율 ${Math.round(UI_Z * 100)}%`, 900);
+}
+{
+  const box = $('#uiZoom'); let t = null;
+  const open = () => { box.classList.add('open'); clearTimeout(t); t = setTimeout(() => box.classList.remove('open'), 4000); }; // 4초 동안 안 만지면 접힘
+  const step = d => { const i = UIZ_STEPS.findIndex(x => Math.abs(x - UI_Z) < 0.01); const j = Math.max(0, Math.min(UIZ_STEPS.length - 1, (i < 0 ? 2 : i) + d)); applyUiZoom(UIZ_STEPS[j]); open(); };
+  $('#uizPlus').addEventListener('click', e => { e.stopPropagation(); step(1); });
+  $('#uizMinus').addEventListener('click', e => { e.stopPropagation(); step(-1); });
+  $('#uizVal').addEventListener('click', e => { e.stopPropagation(); if (box.classList.contains('open')) applyUiZoom(1); open(); });
+  ['pointerdown', 'touchstart', 'dblclick', 'wheel'].forEach(ev => box.addEventListener(ev, e => e.stopPropagation(), { passive: true })); // 지도까지 눌리지 않게
+  if (UIZ_OK) box.classList.remove('hidden');
+  const z0 = +LS.get('uiZoom', 1);
+  UI_Z = UIZ_OK && UIZ_STEPS.some(x => Math.abs(x - z0) < 0.01) ? z0 : 1;
+  document.documentElement.style.setProperty('--ui', UI_Z);
+  $('#uizVal').textContent = Math.round(UI_Z * 100) + '%';
+  $('#uizMinus').disabled = UI_Z <= UIZ_STEPS[0]; $('#uizPlus').disabled = UI_Z >= UIZ_STEPS[UIZ_STEPS.length - 1];
+}
+
 /* ───────── 하단 시트 ───────── */
 const sheet = $('#sheet');
 // 결과 창 높이가 바뀌면(접기·펼치기·내용 변경) 보이는 지도 영역의 가운데가 그대로 유지되도록 지도를 같이 움직임
 let lastSheetH = 0;
+// 화면 배율(--ui)을 쓰면 offsetHeight는 배율 전 값이라, 실제로 보이는 크기(getBoundingClientRect)로 계산
+const sheetVisH = () => Math.round(sheet.getBoundingClientRect().height || 0);
+function visTop() { const m = $('#map').getBoundingClientRect(), f = $('#searchForm').getBoundingClientRect(); return f.height ? f.bottom - m.top : 56 * UI_Z; }
 function setSheetHeight() {
-  const h = sheet.offsetHeight;
+  const h = sheetVisH();
   if (!h) return; // 다른 탭을 보는 중
   document.documentElement.style.setProperty('--sheet-h', h + 'px');
   if (lastSheetH && h !== lastSheetH) map.panBy([0, Math.round((h - lastSheetH) / 2)], { animate: true, duration: 0.25 });
@@ -778,16 +814,15 @@ function fitMapButtons() {
   if (!zc || !col || !col.offsetParent) return;
   zc.classList.remove('squeezed');
   const zb = zc.getBoundingClientRect();
-  const colTop = col.offsetParent.getBoundingClientRect().bottom - sheet.offsetHeight - 10 - col.offsetHeight; // 움직이는 중에도 최종 위치로 계산
+  const colTop = col.offsetParent.getBoundingClientRect().bottom - sheetVisH() - 10 * UI_Z - col.getBoundingClientRect().height; // 움직이는 중에도 최종 위치로 계산
   if (zb.height && zb.bottom + 8 > colTop) zc.classList.add('squeezed');
 }
 window.addEventListener('resize', fitMapButtons);
 // 검색창 아래 ~ 결과 창 위, 실제로 보이는 지도 영역의 가운데에 지점이 오도록 이동
 function setViewVisible(latlng, zoom) {
   const H = map.getSize().y;
-  const sb = $('.searchbar');
-  const top = sb.offsetTop + $('#searchForm').offsetHeight;
-  const bottom = H - (sheet.offsetHeight || 0);
+  const top = visTop();
+  const bottom = H - sheetVisH();
   const offset = bottom > top ? H / 2 - (top + bottom) / 2 : 0;
   const p = map.project(latlng, zoom).add([0, offset]);
   map.setView(map.unproject(p, zoom), zoom);
@@ -1384,7 +1419,7 @@ function locateMe(opt = {}) {
     Promise.resolve(checkAt(lat, lon, '내 위치', { acc: accuracy })).then(() => setTimeout(() => {
       if (!$('#tab-map').classList.contains('active')) return;
       if (!lastResult || lastResult.lat !== lat || lastResult.lon !== lon) return; // 그 사이 다른 지점을 눌렀으면 옮기지 않음
-      lastSheetH = sheet.offsetHeight || lastSheetH;
+      lastSheetH = sheetVisH() || lastSheetH;
       setViewVisible([lat, lon], map.getZoom());
     }, 80));
   }, err => {
@@ -1670,7 +1705,7 @@ function animateMe(lat, lon, acc, dur) {
 // 결과창·검색창을 피해 보이는 지도 한가운데로, 같은 시간 동안 일정한 속도로 이동
 function followTo(latlng, dur, zWant) {
   const z = zWant != null ? zWant : map.getZoom(), H = map.getSize().y;
-  const top = $('.searchbar').offsetTop + $('#searchForm').offsetHeight, bottom = H - (sheet.offsetHeight || 0);
+  const top = visTop(), bottom = H - sheetVisH();
   const offset = bottom > top ? H / 2 - (top + bottom) / 2 : 0;
   const c = map.unproject(map.project(latlng, z).add([0, offset]), z);
   if (z !== map.getZoom()) { appZoomUntil = Date.now() + 1500; map.setView(c, z, { animate: true }); } // 축척이 바뀔 땐 확대·축소 애니메이션
@@ -1686,9 +1721,8 @@ let trackKmh = null, autoZ = null, zCand = null, zCandAt = 0, zChangedAt = 0, ma
 // 그래서 어떤 화면이든 같은 속도에서 비슷한 거리(주변 범위)가 보임
 const AZ_REF_PX = 412;
 function zoomFit() {
-  const sz = map.getSize(), sb = $('.searchbar'), sf = $('#searchForm');
-  const top = sb && sf ? sb.offsetTop + sf.offsetHeight : 56;
-  const px = Math.max(120, Math.min(sz.x, sz.y - top - 96)); // 96 = 접힌 결과창 높이
+  const sz = map.getSize(), top = visTop();
+  const px = Math.max(120, Math.min(sz.x, sz.y - top - 96 * UI_Z)); // 96 = 접힌 결과창 높이
   return { px: Math.round(px), off: Math.max(-2, Math.min(2, Math.round(Math.log2(px / AZ_REF_PX)))) };
 }
 let zFitCache = null, zFitAt = 0;
@@ -2807,6 +2841,7 @@ $('#btnDiagCopy').addEventListener('click', async () => {
 /* ───────── 앱 정보 창 (상단 버전 배지를 누르면) ─────────
    버전·업데이트 확인 / 데이터 상태 / 최근 바뀐 점 / 강제 새로고침·상태 복사·앱 설치·자세히 진단 */
 const CHANGELOG = [
+  ['v1.78', '화면 배율 조절 버튼 (지도 왼쪽 아래 · 80~160%) — 지도는 선명하게, 글자·버튼·창만 크게'],
   ['v1.77', '터널·지하차도에서 GPS가 끊겨도 터널 도로를 따라 추정 이동 (가속도계 보정) · 속도 소수점 한 자리'],
   ['v1.76', '상단 🌊 물때 버튼 — 만조·간조 시각, 밀물·썰물 흐름 그래프, 사리·조금 (4일)'],
   ['v1.75', '자동 축척 단계 변경: 5km/h 미만 20 · ~25 19 · ~50 18 · ~80 17 · ~100 16 · 그 이상 15 (지도 최대 20레벨)'],

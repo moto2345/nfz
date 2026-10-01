@@ -413,3 +413,29 @@ a.tel{color:var(--primary);text-decoration:none;border-bottom:1px solid rgba(21,
 .nav-hud .hud-dr{background:#eceff1;margin:2px -5px;padding:1px 5px;border-radius:5px}
 .nav-hud .hud-dr span,.nav-hud .hud-dr b{color:#455a64;font-weight:800}
 .nav-hud b#hudSpd.dr{color:#607d8b;font-style:italic}
+/* ───── 화면 배율 (--ui): 지도 그림은 그대로, 위에 얹힌 글자·버튼·창만 확대/축소 ───── */
+:root{--ui:1}
+.appbar,.tab.page,.tabbar,.searchbar,.fab-col,.nav-hud,.sheet,.kp-card,.timer-banner,.modal-box,.toast,.leaflet-top,.leaflet-bottom{zoom:var(--ui)}
+#tab-map{inset:calc(var(--appbar-h) * var(--ui)) 0 calc((var(--tabbar-h) + var(--safe-b)) * var(--ui)) 0}
+.fab-col,.kp-card{bottom:calc(var(--sheet-h,96px) / var(--ui) + 10px)}
+.kp-card{max-height:calc(100% - var(--sheet-h,96px) / var(--ui) - 76px)} /* %는 배율과 무관, px·vh는 배율만큼 커짐 */
+.modal-box{max-height:calc(92vh / var(--ui))}
+.toast{max-width:calc(90vw / var(--ui))}
+.searchbar .dropdown{max-height:calc(50vh / var(--ui))}
+/* 배율 조절 버튼 (지도 왼쪽 아래 · 배율과 상관없이 같은 크기) */
+.uiz{position:absolute;left:10px;bottom:calc(var(--sheet-h,96px) + 10px);z-index:810;display:flex;flex-direction:column;align-items:stretch;
+  background:rgba(60,64,72,.82);border-radius:14px;box-shadow:0 3px 10px rgba(0,0,0,.3);overflow:hidden;transition:bottom .2s;touch-action:manipulation}
+.uiz button{border:0;background:none;color:#fff;cursor:pointer;-webkit-tap-highlight-color:transparent;font-family:inherit}
+.uiz .uiz-v{min-width:46px;height:30px;padding:0 6px;font-size:11.5px;font-weight:800;letter-spacing:-.3px}
+.uiz.open .uiz-v{background:rgba(255,255,255,.16);margin:0 5px;border-radius:8px}
+.uiz .uiz-b{display:none;height:38px;font-size:15px;font-weight:800}
+.uiz .uiz-b sup{font-size:11px;margin-left:1px}
+.uiz.open .uiz-b{display:block}
+.uiz .uiz-b:active,.uiz .uiz-v:active{background:rgba(255,255,255,.25)}
+.uiz .uiz-b:disabled{opacity:.35}
+/* 배율을 키워 윗줄이 좁아지면 차례로 줄임 (실제 남는 폭 기준) */
+.appbar{container-type:inline-size;container-name:appbar}
+@container appbar (max-width:440px){ .tide-btn .wxb-txt{display:none} .tide-btn{padding:0 7px} }
+@container appbar (max-width:380px){ .wx-btn .wxb-txt{display:none} .wx-btn{padding:0 7px} }
+@container appbar (max-width:340px){ .appbar h1{display:none} }
+@container appbar (max-width:280px){ .appbar-logo{display:none} .appbar{gap:4px} }
