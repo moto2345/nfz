@@ -1783,7 +1783,8 @@ async function fetchTunnels(lat, lon) {
         const j = await r.json();
         const ways = (j.elements || []).filter(e => e.type === 'way' && e.geometry && e.geometry.length > 1).map(e => {
           const t = e.tags || {}, ow = t.oneway === '-1' ? -1 : (t.oneway === 'yes' || t.oneway === '1' || t.oneway === 'true' || /^motorway/.test(t.highway) || t.junction === 'roundabout') ? 1 : 0;
-          return { id: e.id, nodes: e.nodes || [], pts: e.geometry.map(g => [g.lat, g.lon]), ow, name: t.name || t['tunnel:name'] || t.ref || '' };
+          const ms = parseInt(t.maxspeed, 10);
+          return { id: e.id, nodes: e.nodes || [], pts: e.geometry.map(g => [g.lat, g.lon]), ow, name: t.name || t['tunnel:name'] || t.ref || '', vmax: ms > 0 && ms < 200 ? ms / 3.6 : null };
         });
         tun = { c: [lat, lon], at: Date.now(), ways, busy: false };
         return true;
@@ -1836,7 +1837,7 @@ function drMatch(P, hdg) {
   }
   if (!best) return null;
   let pts = [P].concat(best.i >= 0 ? [best.q].concat(best.pts.slice(best.i + 1)) : best.pts);
-  let name = best.w.name, used = new Set([best.w.id]), endNode = best.nodes[best.nodes.length - 1], lastHdg = bearingOf(pts[pts.length - 2], pts[pts.length - 1]);
+  let name = best.w.name, vmax = best.w.vmax, used = new Set([best.w.id]), endNode = best.nodes[best.nodes.length - 1], lastHdg = bearingOf(pts[pts.length - 2], pts[pts.length - 1]);
   for (let n = 0; n < 12; n++) { // 같은 끝점으로 이어지는 다음 터널 구간 (긴 터널은 여러 조각)
     let nx = null;
     for (const w of tun.ways) if (!used.has(w.id)) for (const dir of (w.ow === 1 ? [1] : w.ow === -1 ? [-1] : [1, -1])) {
@@ -1846,21 +1847,21 @@ function drMatch(P, hdg) {
       if (da <= 45 && (!nx || da < nx.da)) nx = { w, ns, ps, da };
     }
     if (!nx) break;
-    used.add(nx.w.id); pts = pts.concat(nx.ps.slice(1)); endNode = nx.ns[nx.ns.length - 1];
+    used.add(nx.w.id); pts = pts.concat(nx.ps.slice(1)); endNode = nx.ns[nx.ns.length - 1]; if (nx.w.vmax) vmax = Math.max(vmax || 0, nx.w.vmax);
     lastHdg = bearingOf(pts[pts.length - 2], pts[pts.length - 1]); if (!name) name = nx.w.name;
   }
   const tunLen = mkPath(pts).slice(-1)[0].cum;
   // 출구 뒤로 400m 직진 연장 (출구를 나와 GPS가 다시 잡힐 때까지)
   const last = pts[pts.length - 1], rad = lastHdg * Math.PI / 180;
   pts.push([last[0] + 400 * Math.cos(rad) / 110574, last[1] + 400 * Math.sin(rad) / (Math.cos(last[0] * Math.PI / 180) * 111320)]);
-  return { path: mkPath(pts), name, tunLen };
+  return { path: mkPath(pts), name, tunLen, vmax };
 }
 function drStraight(P, hdg, v) { // 터널 도로를 못 찾으면 진행 방향 직진 (짧은 지하차도 등) — 최대 30초·800m
   const L = Math.min(800, v * 30), rad = hdg * Math.PI / 180;
   return { path: mkPath([P, [P[0] + L * Math.cos(rad) / 110574, P[1] + L * Math.sin(rad) / (Math.cos(P[0] * Math.PI / 180) * 111320)]]), name: '', tunLen: 0 };
 }
 /* 가속도계: GPS가 잡히는 동안 'GPS 속도 변화'와 '폰이 느낀 가속도'를 비교해 차의 앞 방향(폰 기준)을 학습 */
-const IMU = { acc: [0, 0, 0], n: 0, grav: null, g0: null, sx: 0, sxx: 0, sm: [0, 0, 0], smx: [0, 0, 0], w: 0, prevV: null, prevT: 0, on: false };
+const IMU = { acc: [0, 0, 0], sq: 0, db: [0, 0, 0], vib: null, vibMove: null, vibStop: null, n: 0, grav: null, g0: null, sx: 0, sxx: 0, sm: [0, 0, 0], smx: [0, 0, 0], w: 0, prevV: null, prevT: 0, on: false };
 function onMotion(e) {
   let a = e.acceleration, x, y, z;
   const g = e.accelerationIncludingGravity;
@@ -1869,19 +1870,30 @@ function onMotion(e) {
   else if (g && g.x != null && IMU.grav) { x = g.x - IMU.grav[0]; y = g.y - IMU.grav[1]; z = g.z - IMU.grav[2]; }
   else return;
   if (!isFinite(x + y + z)) return;
-  IMU.acc[0] += x; IMU.acc[1] += y; IMU.acc[2] += z; IMU.n++;
+  IMU.acc[0] += x; IMU.acc[1] += y; IMU.acc[2] += z; IMU.sq += x * x + y * y + z * z; IMU.n++;
 }
-function imuTake() { if (!IMU.n) return null; const m = IMU.acc.map(v => v / IMU.n); IMU.acc = [0, 0, 0]; IMU.n = 0; return m; }
+// 구간 평균 가속도(벡터) + 진동 세기(흔들림의 분산) — 진동은 '차가 섰는지' 판단에 씀 (서 있으면 노면 진동이 사라짐)
+function imuTake() {
+  if (!IMU.n) { IMU.vib = null; return null; }
+  const m = IMU.acc.map(v => v / IMU.n);
+  IMU.vib = Math.max(0, IMU.sq / IMU.n - (m[0] * m[0] + m[1] * m[1] + m[2] * m[2]));
+  IMU.acc = [0, 0, 0]; IMU.sq = 0; IMU.n = 0; return m;
+}
 async function imuOn(on) {
   if (on && !IMU.on) {
     try { if (window.DeviceMotionEvent && typeof DeviceMotionEvent.requestPermission === 'function' && (await DeviceMotionEvent.requestPermission()) !== 'granted') return; } catch (e) { return; }
     window.addEventListener('devicemotion', onMotion); IMU.on = true;
   } else if (!on && IMU.on) { window.removeEventListener('devicemotion', onMotion); IMU.on = false; }
-  Object.assign(IMU, { acc: [0, 0, 0], n: 0, sx: 0, sxx: 0, sm: [0, 0, 0], smx: [0, 0, 0], w: 0, prevV: null, prevT: 0, g0: null });
+  Object.assign(IMU, { acc: [0, 0, 0], sq: 0, n: 0, sx: 0, sxx: 0, sm: [0, 0, 0], smx: [0, 0, 0], w: 0, prevV: null, prevT: 0, g0: null, db: [0, 0, 0], vib: null, vibMove: null, vibStop: null });
 }
 function imuLearn(spd, t) { // GPS 위치가 올 때마다
   const m = imuTake();
   if (spd == null || isNaN(spd) || !m) { IMU.prevV = null; return; }
+  // 달릴 때·서 있을 때의 진동 세기를 따로 배워 둠
+  if (IMU.vib != null) {
+    if (spd > 5) IMU.vibMove = IMU.vibMove == null ? IMU.vib : IMU.vibMove + (IMU.vib - IMU.vibMove) * 0.1;
+    else if (spd < 0.5) IMU.vibStop = IMU.vibStop == null ? IMU.vib : IMU.vibStop + (IMU.vib - IMU.vibStop) * 0.2;
+  }
   if (IMU.prevV != null) {
     const dt = (t - IMU.prevT) / 1000;
     if (dt >= 0.5 && dt <= 3) {
@@ -1918,7 +1930,8 @@ function drStart() {
   if (hdg == null) { const o = goodHist.find(h => distM([h.lat, h.lon], P) > 25); if (o) hdg = bearingOf([o.lat, o.lon], P); }
   if (hdg == null) return; // 방향을 모르면 추정하지 않음
   const v0 = trackKmh / 3.6;
-  Object.assign(DR, { on: true, done: true, P, hdg, v0, v: v0, t: Date.now(), startAt: lastGood.at, imu: !!imuModel() && imuPoseSame() });
+  Object.assign(DR, { on: true, done: true, P, hdg, v0, v: v0, t: Date.now(), startAt: lastGood.at, imu: !!imuModel() && imuPoseSame(), quiet: 0, usedImu: false, zupt: false });
+  IMU.db = [0, 0, 0];
   DR.s = v0 * (Date.now() - lastGood.at) / 1000; // 끊긴 뒤 지난 시간만큼 이미 갔다고 봄
   drSetPath();
   imuTake(); // 끊기기 전 값은 버림
@@ -1933,22 +1946,37 @@ function drStart() {
 }
 function drSetPath() {
   const m = drMatch(DR.P, DR.hdg) || drStraight(DR.P, DR.hdg, DR.v0);
-  DR.path = m.path; DR.name = m.name; DR.tunLen = m.tunLen;
+  DR.path = m.path; DR.name = m.name; DR.tunLen = m.tunLen; DR.vmax = m.vmax || null;
   $('#hudDrLab').textContent = m.tunLen ? '🚇 터널 추정' : '➡ 직진 추정';
 }
 function drTick() {
   if (!DR.on) return;
   const now = Date.now(), dt = (now - DR.t) / 1000; DR.t = now;
-  // 속도: 가속도계 반영 (가능할 때) · 아니면 끊기기 전 속도 그대로
-  const mod = DR.imu && imuPoseSame() ? imuModel() : null, m = imuTake();
+  // 속도: 가속도계로 터널 끝까지 계속 보정
+  //  · 차 앞 방향 가속도를 적분 (치우침 b는 GPS가 있을 때 배운 값 + 정지 중 다시 맞춘 값)
+  //  · 진동이 '서 있을 때' 수준으로 줄면 정지로 보고 속도 0 (막힌 터널) — 이때 센서 치우침도 다시 맞춰 오차가 쌓이지 않게
+  //  · 속도 상한: 터널 제한속도(지도 정보)나 끊기기 전 속도의 1.25배
+  //  · 폰을 만져 자세가 바뀌면 그때까지 추정한 속도를 유지
+  const mod = DR.imu && imuPoseSame() ? imuModel() : null, m = imuTake(), vib = IMU.vib;
+  const vCap = Math.max(DR.v0, DR.vmax || 0) * 1.25 + 3;
+  const thr = IMU.vibMove == null ? null : IMU.vibStop != null && IMU.vibStop < IMU.vibMove * 0.6 ? (IMU.vibStop + IMU.vibMove) / 2 : IMU.vibMove * 0.3;
+  if (thr != null && vib != null && vib < thr) DR.quiet += dt; else DR.quiet = 0;
+  DR.zupt = DR.quiet >= (DR.v < 8.4 ? 2 : 5); // 30km/h 아래면 2초, 그 이상이면 5초 조용해야 정지로 봄
   if (mod && m) {
-    let a = ((m[0] - mod.b[0]) * mod.f[0] + (m[1] - mod.b[1]) * mod.f[1] + (m[2] - mod.b[2]) * mod.f[2]) / mod.f2;
-    a = Math.max(-5, Math.min(4, a));
-    DR.v = Math.max(0, Math.min(DR.v0 * 1.5 + 5, DR.v + a * dt));
-    if (DR.v < 0.8) DR.v = 0;
-  } else DR.v = DR.v0;
+    if (DR.zupt) {
+      DR.v = 0;
+      for (let i = 0; i < 3; i++) IMU.db[i] += ((m[i] - mod.b[i]) - IMU.db[i]) * Math.min(1, dt / 4); // 서 있는 동안 재는 값 = 센서 치우침
+    } else {
+      const b = mod.b.map((v, i) => v + IMU.db[i]);
+      let a = ((m[0] - b[0]) * mod.f[0] + (m[1] - b[1]) * mod.f[1] + (m[2] - b[2]) * mod.f[2]) / mod.f2;
+      a = Math.max(-5, Math.min(4, a));
+      DR.v = Math.max(0, Math.min(vCap, DR.v + a * dt));
+    }
+    DR.usedImu = true;
+  } else if (DR.zupt) DR.v = 0; // 가속도 학습이 없어도 진동으로 정지는 알 수 있음
+  else if (!DR.usedImu) DR.v = DR.v0; // 학습 없음: 다시 움직이면 끊기기 전 속도로
   const elapsed = (now - DR.startAt) / 1000, total = DR.path[DR.path.length - 1].cum;
-  const maxT = DR.tunLen ? 300 : 30; // 터널은 최대 5분, 직진 추정은 30초
+  const maxT = DR.tunLen ? Math.min(2400, Math.max(300, DR.tunLen / 4 + 180)) : 30; // 터널: 길이에 맞춰(시속 14km로도 빠져나올 시간 + 3분, 최대 40분) · 직진 추정 30초
   if (elapsed <= maxT) DR.s = Math.min(total, DR.s + DR.v * dt);
   const at = pathAt(DR.path, DR.s), acc = Math.min(400, 15 + DR.s * 0.04);
   gpsHeading = at.hdg;
@@ -1961,7 +1989,7 @@ function drTick() {
   $('#hudSpd').textContent = `~${(DR.v * 3.6).toFixed(1)} km/h`; $('#hudSpd').className = 'dr';
   const left = DR.tunLen ? Math.max(0, DR.tunLen - DR.s) : null;
   $('#hudDr').textContent = elapsed > maxT || at.end ? 'GPS 기다리는 중'
-    : (DR.name ? DR.name.slice(0, 10) + ' · ' : '') + (left != null ? (left > 0 ? `출구까지 ${left >= 1000 ? (left / 1000).toFixed(1) + 'km' : Math.round(left / 10) * 10 + 'm'}` : '출구 지남') : `${Math.round(DR.s)}m`) + (mod ? ' · 가속도계' : '');
+    : (DR.name ? DR.name.slice(0, 10) + ' · ' : '') + (left != null ? (left > 0 ? `출구까지 ${left >= 1000 ? (left / 1000).toFixed(1) + 'km' : Math.round(left / 10) * 10 + 'm'}` : '출구 지남') : `${Math.round(DR.s)}m`) + (DR.zupt ? ' · 정지' : mod ? ' · 가속도계' : '');
 }
 function drStop() {
   if (!DR.on) return;
@@ -2841,6 +2869,7 @@ $('#btnDiagCopy').addEventListener('click', async () => {
 /* ───────── 앱 정보 창 (상단 버전 배지를 누르면) ─────────
    버전·업데이트 확인 / 데이터 상태 / 최근 바뀐 점 / 강제 새로고침·상태 복사·앱 설치·자세히 진단 */
 const CHANGELOG = [
+  ['v1.79', '터널 추정: 가속도계 보정을 출구까지 계속 (긴 터널 지원 · 정체로 멈추면 정지 감지 · 센서 치우침 자동 보정 · 제한속도 상한)'],
   ['v1.78', '화면 배율 조절 버튼 (지도 왼쪽 아래 · 80~160%) — 지도는 선명하게, 글자·버튼·창만 크게'],
   ['v1.77', '터널·지하차도에서 GPS가 끊겨도 터널 도로를 따라 추정 이동 (가속도계 보정) · 속도 소수점 한 자리'],
   ['v1.76', '상단 🌊 물때 버튼 — 만조·간조 시각, 밀물·썰물 흐름 그래프, 사리·조금 (4일)'],
