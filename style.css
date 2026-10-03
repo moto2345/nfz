@@ -188,7 +188,7 @@ a.btn{text-decoration:none;color:var(--primary)}
 .field input,.field textarea{display:block;width:100%;margin-top:3px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);font-size:13px;color:var(--text)}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;display:flex;align-items:flex-end;justify-content:center}
-.modal-box{background:var(--card);width:100%;max-width:416px;max-height:92vh;overflow-y:auto;border-radius:14px 14px 0 0;padding:14px 14px calc(14px + var(--safe-b))}
+.modal-box{background:var(--card);width:100%;max-width:416px;max-height:92%;overflow-y:auto;border-radius:14px 14px 0 0;padding:14px 14px calc(14px + var(--safe-b))}
 .modal-box h3{margin:0 0 5px}
 @media (min-width:600px){ .modal{align-items:center} .modal-box{border-radius:18px} }
 
@@ -419,9 +419,9 @@ a.tel{color:var(--primary);text-decoration:none;border-bottom:1px solid rgba(21,
 #tab-map{inset:calc(var(--appbar-h) * var(--ui)) 0 calc((var(--tabbar-h) + var(--safe-b)) * var(--ui)) 0}
 .fab-col,.kp-card{bottom:calc(var(--sheet-h,96px) / var(--ui) + 10px)}
 .kp-card{max-height:calc(100% - var(--sheet-h,96px) / var(--ui) - 76px)} /* %는 배율과 무관, px·vh는 배율만큼 커짐 */
-.modal-box{max-height:calc(92vh / var(--ui))}
+.modal-box{max-height:92%} /* %는 화면 배율·주소창과 무관하게 실제 보이는 높이 기준 */
 .toast{max-width:calc(90vw / var(--ui))}
-.searchbar .dropdown{max-height:calc(50vh / var(--ui))}
+.searchbar .dropdown{max-height:calc(50vh / var(--ui));max-height:calc(50dvh / var(--ui))} /* dvh = 주소창을 뺀 실제 높이 */
 /* 배율 조절 버튼 (지도 왼쪽 아래 · 배율과 상관없이 같은 크기) */
 .uiz{position:absolute;left:10px;bottom:calc(var(--sheet-h,96px) + 10px);z-index:810;display:flex;flex-direction:column;align-items:stretch;
   background:rgba(60,64,72,.82);border-radius:14px;box-shadow:0 3px 10px rgba(0,0,0,.3);overflow:hidden;transition:bottom .2s;touch-action:manipulation}
