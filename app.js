@@ -1314,10 +1314,25 @@ function openOnestop(r) {
   const addr = r && r.addr && (r.addr.road || r.addr.parcel);
   const text = addr ? addr.replace(/\s*\(.*\)\s*$/, '') : r ? `${r.lat.toFixed(6)}, ${r.lon.toFixed(6)}` : '';
   const copied = text && copySync(text);
-  if (window.NFZApp) { const a = document.createElement('a'); a.href = ONESTOP_AREA; a.target = '_blank'; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove(); }
-  else window.open(ONESTOP_AREA, '_blank', 'noopener');
-  if (copied) toast(`${addr ? '주소' : '좌표'}를 복사했어요 — 원스톱 검색창에 붙여넣기 하세요\n${text}`, 4500);
+  // 좌표를 주소 # 뒤에 붙여 둠 → PC의 '🛂 하코 지점 찍기' 즐겨찾기나 자동 선택 스크립트가 읽어서 그 지점을 찍음 (서버로는 안 감)
+  const url = r ? `${ONESTOP_AREA}#hako=${r.lat.toFixed(6)},${r.lon.toFixed(6)}` : ONESTOP_AREA;
+  if (window.NFZApp) { const a = document.createElement('a'); a.href = url; a.target = '_blank'; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove(); }
+  else window.open(url, '_blank', 'noopener');
+  if (copied) toast(`${addr ? '주소' : '좌표'}를 복사했어요 — 원스톱 검색창에 붙여넣기 하세요\n${text}` + (window.NFZApp ? '' : `\n(PC는 즐겨찾기 '🛂 하코 지점 찍기'로 자동 선택 — 앱 정보 탭 참고)`), 5500);
 }
+// PC용 즐겨찾기 버튼 (원스톱 화면에서 누르면 주소 # 뒤의 좌표로 지도를 옮기고 그 지점을 선택)
+const ONESTOP_PICK_JS = "(function(){var m=(location.hash||'').match(/hako=(-?[0-9.]+),(-?[0-9.]+)/);"
+  + "if(location.hostname.indexOf('onestop.go.kr')<0){alert('드론원스톱 비행가능지역 확인 화면에서 눌러 주세요');return;}"
+  + "if(!m){alert('하코 NFZ의 🛂 원스톱 버튼으로 연 화면에서 눌러 주세요');return;}"
+  + "var lat=+m[1],lon=+m[2],n=0;(function go(){if(window.vmap&&window.ol&&typeof singleClickEvent==='function'&&typeof getPixelToBBOX==='function'){"
+  + "try{var c=ol.proj.transform([lon,lat],'EPSG:4326','EPSG:3857');vmap.getView().setCenter(c);vmap.getView().setZoom(15);"
+  + "setTimeout(function(){try{bbox=getPixelToBBOX();singleClickEvent(c,null);}catch(e){}},600);}catch(e){}}"
+  + "else if(n++<60)setTimeout(go,250);})();})();";
+(() => {
+  const b = document.getElementById('osBookmarklet');
+  if (b) { b.href = 'javascript:' + encodeURIComponent(ONESTOP_PICK_JS); b.addEventListener('click', e => { e.preventDefault(); toast('이 버튼은 누르지 말고 즐겨찾기 막대로 끌어다 놓으세요', 3000); }); }
+  if (window.NFZApp && window.NFZApp.openOnestop) { const c = document.getElementById('osPcCard'); if (c) c.hidden = true; } // 앱은 자동으로 찍힘
+})();
 // 상단 🛂 버튼: 날씨·물때처럼 확인한 지점 → 없으면 내 위치 → 없으면 지도 가운데
 function openOnestopHere() {
   if (lastResult) return openOnestop(Object.assign({}, lastResult, { _name: refName() }));
@@ -2901,6 +2916,9 @@ $('#btnDiagCopy').addEventListener('click', async () => {
 /* ───────── 앱 정보 창 (상단 버전 배지를 누르면) ─────────
    버전·업데이트 확인 / 데이터 상태 / 최근 바뀐 점 / 강제 새로고침·상태 복사·앱 설치·자세히 진단 */
 const CHANGELOG = [
+  ['v1.87', 'PC에서도 🛂 원스톱 화면에 지점 자동 선택 — 즐겨찾기 버튼(설치 없음) 또는 자동 선택 스크립트 (앱 정보 탭)'],
+  ['v1.86', '앱: 원스톱 남은 로그인 시간을 사이트 시계와 똑같이 (원스톱 화면을 새로 열 때 120분으로)'],
+  ['v1.85', '앱: 원스톱 창 위쪽에 로그인 상태·남은 시간 표시 (🔒/🔓), 로그인 후 보던 지점으로 돌아오기 수정'],
   ['v1.84', '상단에 🛂 원스톱 버튼 추가 (물때 옆) — 확인한 지점, 없으면 내 위치를 원스톱에서 바로 확인'],
   ['v1.83', '앱: 원스톱 창에 로그인 버튼(로그인 후 보던 지점으로 복귀) · 🖨 PDF 저장/인쇄 · 공식 결과 문서 창 지원'],
   ['v1.82', '앱: 원스톱 비행구역 확인을 앱 안 창으로 — 확인하던 지점 자동 선택 · 지도와 결과표를 한 화면에 (가로면 좌우로)'],

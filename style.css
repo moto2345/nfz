@@ -440,6 +440,11 @@ a.tel{color:var(--primary);text-decoration:none;border-bottom:1px solid rgba(21,
 @container appbar (max-width:440px){ .tide-btn .wxb-txt{display:none} .tide-btn{padding:0 7px} }
 @container appbar (max-width:380px){ .wx-btn .wxb-txt{display:none} .wx-btn{padding:0 7px} }
 @container appbar (max-width:340px){ .appbar h1{display:none} }
+/* 항공고시보 종이 보일 때는 한 칸 더 필요 → '현재날씨' 글자를 먼저 줄이고, 그래도 좁으면 제목을 숨김 */
+@container appbar (max-width:450px){ .appbar:has(#btnNotam:not(.hidden)) .wx-btn .wxb-txt{display:none} .appbar:has(#btnNotam:not(.hidden)) .wx-btn{padding:0 7px} }
+@container appbar (max-width:300px){ .appbar:has(#btnNotam:not(.hidden)) h1{display:none} }
+@container appbar (max-width:240px){ .appbar:has(#btnNotam:not(.hidden)) .badge{display:none} } /* 아주 좁을 때: 버전 표시는 아래 '안내' 탭으로 */
+.appbar h1{min-width:0;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto}
 @container appbar (max-width:280px){ .appbar-logo{display:none} .appbar{gap:4px} }
 @container appbar (max-width:230px){ .appbar{gap:3px} .wx-btn,.tide-btn,.os-btn{padding:0 5px} }
 .btn.onestop-btn{border-color:#1565c0;color:#1565c0;font-weight:700}

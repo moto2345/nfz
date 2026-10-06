@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="하코 NFZ">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-  <link rel="stylesheet" href="style.css?v=84">
+  <link rel="stylesheet" href="style.css?v=87">
 </head>
 <body>
 
@@ -20,7 +20,7 @@
 <header class="appbar">
   <img src="icons/icon-192.png" alt="" class="appbar-logo">
   <h1>하코 NFZ 조회</h1>
-  <button id="btnVer" class="badge" type="button" aria-label="앱 정보">v1.84</button>
+  <button id="btnVer" class="badge" type="button" aria-label="앱 정보">v1.87</button>
   <button id="btnWx" class="wx-btn" type="button" aria-label="현재 날씨" title="현재 날씨"><span class="wxb-ico">🌤</span><span class="wxb-txt">현재날씨</span></button>
   <button id="btnTide" class="wx-btn tide-btn" type="button" aria-label="물때 (밀물·썰물)" title="물때 (밀물·썰물)"><span class="wxb-ico">🌊</span><span class="wxb-txt">물때</span></button>
   <button id="btnOnestopHd" class="wx-btn os-btn" type="button" aria-label="원스톱 비행구역 확인" title="드론원스톱 비행구역 확인 (확인한 지점 · 없으면 내 위치)"><span class="wxb-ico">🛂</span><span class="wxb-txt">원스톱</span></button>
@@ -194,6 +194,16 @@
     <div class="row-btns"><a class="btn sm" href="https://drone.onestop.go.kr" target="_blank" rel="noopener">드론 원스톱 바로가기</a>
       <a class="btn sm onestop-btn" href="https://drone.onestop.go.kr/common/flightArea_chk" target="_blank" rel="noopener">🛂 비행가능지역 확인 (공식)</a></div>
   </div>
+
+  <details class="card" id="osPcCard">
+    <summary><b>💻 PC에서 원스톱 지점 자동 선택</b></summary>
+    <p class="small">PC 브라우저에서는 원스톱이 다른 사이트(새 탭)라서 하코 NFZ가 그 화면을 직접 조작할 수 없어요. 아래 둘 중 하나를 한 번만 해 두면, 🛂 버튼으로 연 원스톱 화면에서 확인하던 지점이 바로 찍혀요.</p>
+    <p class="small"><b>① 즐겨찾기 버튼 (설치 없음)</b> — 아래 버튼을 브라우저 <b>즐겨찾기 막대로 끌어다 놓으세요</b>. 원스톱 화면이 열리면 그 즐겨찾기를 한 번 누르면 돼요.<br>
+      <a class="btn sm onestop-btn" id="osBookmarklet" href="#" title="즐겨찾기 막대로 끌어다 놓으세요">🛂 하코 지점 찍기</a></p>
+    <p class="small"><b>② 완전 자동 (Tampermonkey)</b> — 크롬·엣지에 <a href="https://www.tampermonkey.net/" target="_blank" rel="noopener">Tampermonkey</a> 확장을 설치한 뒤 아래 링크를 열고 '설치'를 누르세요. 그다음부터는 누를 것 없이 자동으로 찍혀요.<br>
+      <a class="btn sm" href="onestop.user.js" target="_blank" rel="noopener">⬇ 원스톱 자동 선택 스크립트 설치</a></p>
+    <p class="muted small">원스톱 사이트에 하코 NFZ가 보낸 좌표(주소창 # 뒤)만 읽어서 지도를 그 지점으로 옮기고 누르는 것뿐이에요. 로그인 정보 등은 건드리지 않아요.</p>
+  </details>
 
   <div class="card">
     <b>허가와 별도로 사전 협의가 필요한 곳</b>
@@ -370,7 +380,7 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="config.js?v=84"></script>
-<script src="app.js?v=84"></script>
+<script src="config.js?v=87"></script>
+<script src="app.js?v=87"></script>
 </body>
 </html>
