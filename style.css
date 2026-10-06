@@ -389,6 +389,7 @@ a.tel{color:var(--primary);text-decoration:none;border-bottom:1px solid rgba(21,
 @media (prefers-color-scheme:dark){.coord:active,.coord.copied{background:#1e3a5f}}
 /* 물때 */
 @media (max-width:440px){ .tide-btn .wxb-txt{display:none} .tide-btn{padding:0 7px} }
+@media (max-width:560px){ .os-btn .wxb-txt{display:none} .os-btn{padding:0 7px} }
 .tide-now{border-radius:10px;padding:9px 11px;margin:4px 0 6px;background:var(--bg);display:flex;flex-direction:column;gap:2px;font-size:12.5px}
 .tide-now > b{font-size:14px}
 .tide-now.rising > b{color:#1565c0} .tide-now.falling > b{color:#00897b}
@@ -435,9 +436,11 @@ a.tel{color:var(--primary);text-decoration:none;border-bottom:1px solid rgba(21,
 .uiz .uiz-b:disabled{opacity:.35}
 /* 배율을 키워 윗줄이 좁아지면 차례로 줄임 (실제 남는 폭 기준) */
 .appbar{container-type:inline-size;container-name:appbar}
+@container appbar (max-width:560px){ .os-btn .wxb-txt{display:none} .os-btn{padding:0 7px} }
 @container appbar (max-width:440px){ .tide-btn .wxb-txt{display:none} .tide-btn{padding:0 7px} }
 @container appbar (max-width:380px){ .wx-btn .wxb-txt{display:none} .wx-btn{padding:0 7px} }
 @container appbar (max-width:340px){ .appbar h1{display:none} }
 @container appbar (max-width:280px){ .appbar-logo{display:none} .appbar{gap:4px} }
+@container appbar (max-width:230px){ .appbar{gap:3px} .wx-btn,.tide-btn,.os-btn{padding:0 5px} }
 .btn.onestop-btn{border-color:#1565c0;color:#1565c0;font-weight:700}
 .toast{white-space:pre-line}
