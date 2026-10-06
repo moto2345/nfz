@@ -1267,7 +1267,7 @@ function renderResult(r) {
       <button class="btn sm" id="btnLogHere">📒 기록 추가</button>
       <button class="btn sm" id="btnFlyStart">⏱ 비행 시작</button>
       <button class="btn sm" id="btnCopy">📋 좌표·주소 복사</button>
-      <a class="btn sm" href="https://drone.onestop.go.kr" target="_blank" rel="noopener">드론원스톱</a>
+      <button class="btn sm onestop-btn" id="btnOnestop" title="드론원스톱 '비행가능지역 확인'을 열고 이 지점 주소를 복사">🛂 원스톱 비행구역 확인</button>
     </div>`;
   if (isMe && r.acc > 300) h += `<p class="acc-warn">📍 위치 오차가 약 ${fmtDist(r.acc)}예요. 휴대폰 설정에서 <b>정확한 위치</b>(GPS)를 켜면 판정이 정확해져요. 경계 근처라면 지도에서 직접 지점을 눌러 확인하세요.</p>`;
   if (r.inside.length) h += `<div class="section-title">이 지점이 속한 공역</div>` + r.inside.map(x => zoneRow(x, false)).join('');
@@ -1288,11 +1288,32 @@ function renderResult(r) {
   $('#btnLogHere').onclick = () => openLogForm({ fromResult: r });
   $('#btnFlyStart').onclick = () => startTimer();
   $('#btnCopy').onclick = () => copyPoint(r);
+  $('#btnOnestop').onclick = () => openOnestop(r);
   fillContacts(r);
   const rb = $('#btnRecheck'); if (rb) rb.onclick = () => checkAt(r.lat, r.lon, r.label || undefined, { retried: true });
 }
 
 // 비행승인·촬영허가 신청서에 붙여넣기 좋게 정리
+/* 드론원스톱 '비행가능지역 확인' — 공식 사이트라 다른 화면 안에 넣을 수 없어 따로 띄움.
+   여는 순간 지점 주소(없으면 좌표)를 복사해 두면 원스톱 검색창에 붙여넣기만 하면 됨.
+   앱: 앱 위에 뜨는 브라우저 창(닫으면 보던 화면 그대로) · 웹: 새 탭 */
+const ONESTOP_AREA = 'https://drone.onestop.go.kr/common/flightArea_chk';
+function copySync(text) { // 새 창을 열기 전에 바로 복사 (창이 열리면 복사가 막히는 브라우저가 있음)
+  let ok = false;
+  try { const ta = document.createElement('textarea'); ta.value = text; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+    document.body.appendChild(ta); ta.select(); ok = document.execCommand('copy'); ta.remove(); } catch (e) {}
+  try { navigator.clipboard && navigator.clipboard.writeText(text).catch(() => {}); ok = true; } catch (e) {}
+  return ok;
+}
+function openOnestop(r) {
+  r = r || lastResult;
+  const addr = r && r.addr && (r.addr.road || r.addr.parcel);
+  const text = addr ? addr.replace(/\s*\(.*\)\s*$/, '') : r ? `${r.lat.toFixed(6)}, ${r.lon.toFixed(6)}` : '';
+  const copied = text && copySync(text);
+  if (window.NFZApp) { const a = document.createElement('a'); a.href = ONESTOP_AREA; a.target = '_blank'; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove(); }
+  else window.open(ONESTOP_AREA, '_blank', 'noopener');
+  if (copied) toast(`${addr ? '주소' : '좌표'}를 복사했어요 — 원스톱 검색창에 붙여넣기 하세요\n${text}`, 4500);
+}
 async function copyPoint(r) {
   const zones = [...new Set(r.inside.map(x => x.zone.name + (x.label ? ` (${x.label})` : '')))].join(', ') || '해당 없음';
   const text = [
@@ -2869,6 +2890,7 @@ $('#btnDiagCopy').addEventListener('click', async () => {
 /* ───────── 앱 정보 창 (상단 버전 배지를 누르면) ─────────
    버전·업데이트 확인 / 데이터 상태 / 최근 바뀐 점 / 강제 새로고침·상태 복사·앱 설치·자세히 진단 */
 const CHANGELOG = [
+  ['v1.81', '결과창 🛂 원스톱 비행구역 확인 — 드론원스톱 공식 확인 화면을 열고 지점 주소를 복사 (앱은 앱 위 브라우저 창으로)'],
   ['v1.80', '휴대폰 브라우저에서 앱 정보·날씨 등 창의 윗부분이 주소창에 가려 잘리던 문제 수정'],
   ['v1.79', '터널 추정: 가속도계 보정을 출구까지 계속 (긴 터널 지원 · 정체로 멈추면 정지 감지 · 센서 치우침 자동 보정 · 제한속도 상한)'],
   ['v1.78', '화면 배율 조절 버튼 (지도 왼쪽 아래 · 80~160%) — 지도는 선명하게, 글자·버튼·창만 크게'],

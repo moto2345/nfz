@@ -439,3 +439,5 @@ a.tel{color:var(--primary);text-decoration:none;border-bottom:1px solid rgba(21,
 @container appbar (max-width:380px){ .wx-btn .wxb-txt{display:none} .wx-btn{padding:0 7px} }
 @container appbar (max-width:340px){ .appbar h1{display:none} }
 @container appbar (max-width:280px){ .appbar-logo{display:none} .appbar{gap:4px} }
+.btn.onestop-btn{border-color:#1565c0;color:#1565c0;font-weight:700}
+.toast{white-space:pre-line}
