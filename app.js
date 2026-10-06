@@ -1307,6 +1307,10 @@ function copySync(text) { // 새 창을 열기 전에 바로 복사 (창이 열�
 }
 function openOnestop(r) {
   r = r || lastResult;
+  // 새 앱: 앱 안 원스톱 창으로 열고 이 지점을 자동 선택 (지도·결과표가 한 화면에)
+  if (window.NFZApp && window.NFZApp.openOnestop) {
+    try { window.NFZApp.openOnestop(r ? r.lat : NaN, r ? r.lon : NaN); if (r) toast('원스톱에서 이 지점을 자동으로 선택해요', 2500); return; } catch (e) {}
+  }
   const addr = r && r.addr && (r.addr.road || r.addr.parcel);
   const text = addr ? addr.replace(/\s*\(.*\)\s*$/, '') : r ? `${r.lat.toFixed(6)}, ${r.lon.toFixed(6)}` : '';
   const copied = text && copySync(text);
@@ -2890,6 +2894,7 @@ $('#btnDiagCopy').addEventListener('click', async () => {
 /* ───────── 앱 정보 창 (상단 버전 배지를 누르면) ─────────
    버전·업데이트 확인 / 데이터 상태 / 최근 바뀐 점 / 강제 새로고침·상태 복사·앱 설치·자세히 진단 */
 const CHANGELOG = [
+  ['v1.82', '앱: 원스톱 비행구역 확인을 앱 안 창으로 — 확인하던 지점 자동 선택 · 지도와 결과표를 한 화면에 (가로면 좌우로)'],
   ['v1.81', '결과창 🛂 원스톱 비행구역 확인 — 드론원스톱 공식 확인 화면을 열고 지점 주소를 복사 (앱은 앱 위 브라우저 창으로)'],
   ['v1.80', '휴대폰 브라우저에서 앱 정보·날씨 등 창의 윗부분이 주소창에 가려 잘리던 문제 수정'],
   ['v1.79', '터널 추정: 가속도계 보정을 출구까지 계속 (긴 터널 지원 · 정체로 멈추면 정지 감지 · 센서 치우침 자동 보정 · 제한속도 상한)'],
