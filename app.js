@@ -1238,7 +1238,7 @@ function renderMiscContacts() {
 
 // 좌표 표기: 도분초 (N 35°07'34.1")
 function dmsOf(v) { const t = Math.round(Math.abs(v) * 36000) / 10, d = Math.floor(t / 3600), m = Math.floor((t - d * 3600) / 60), sec = (t - d * 3600 - m * 60).toFixed(1); return `${d}°${String(m).padStart(2, '0')}'${sec.padStart(4, '0')}"`; }
-const coordDec = r => `${r.lat.toFixed(5)}, ${r.lon.toFixed(5)}`;
+const coordDec = r => `${r.lat.toFixed(6)}, ${r.lon.toFixed(6)}`;
 const coordDms = r => `${r.lat >= 0 ? 'N' : 'S'} ${dmsOf(r.lat)} ${r.lon >= 0 ? 'E' : 'W'} ${dmsOf(r.lon)}`;
 // 클립보드 복사 (앱·옛 브라우저는 예전 방식으로 한 번 더)
 async function copyToClip(text, msg) {
@@ -2916,6 +2916,8 @@ $('#btnDiagCopy').addEventListener('click', async () => {
 /* ───────── 앱 정보 창 (상단 버전 배지를 누르면) ─────────
    버전·업데이트 확인 / 데이터 상태 / 최근 바뀐 점 / 강제 새로고침·상태 복사·앱 설치·자세히 진단 */
 const CHANGELOG = [
+  ['v1.89', '내 위치·확인한 지점의 위경도를 소수점 6자리까지 표시 (복사도 6자리)'],
+  ['v1.88', '앱: 원스톱 창에서 항공고시보 등 다른 사이트는 폰 브라우저로 열기 · 🖨 PDF 버튼 제거'],
   ['v1.87', 'PC에서도 🛂 원스톱 화면에 지점 자동 선택 — 즐겨찾기 버튼(설치 없음) 또는 자동 선택 스크립트 (앱 정보 탭)'],
   ['v1.86', '앱: 원스톱 남은 로그인 시간을 사이트 시계와 똑같이 (원스톱 화면을 새로 열 때 120분으로)'],
   ['v1.85', '앱: 원스톱 창 위쪽에 로그인 상태·남은 시간 표시 (🔒/🔓), 로그인 후 보던 지점으로 돌아오기 수정'],
